@@ -1789,7 +1789,7 @@ boolean Acme::ValidateAlertServer() {
 
   free(msg);
   if (reply) {
-    ESP_LOGE(acme_tag, "%s: PerformWebQuery -> %s", __FUNCTION__, reply);
+    ESP_LOGD(acme_tag, "%s: PerformWebQuery -> %s", __FUNCTION__, reply);
   } else {
     ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
   }
@@ -1902,7 +1902,7 @@ boolean Acme::ReadAuthorizationReply(JsonObject &json) {
     ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply status (null)");
     return false;
   }
-  ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply status %s", status);
+  ESP_LOGD(acme_tag, "Acme::ReadAuthorizationReply status %s", status);
 
   if (strcmp(status, acme_status_valid) != 0) {
     ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply invalid status, returning");
@@ -1911,7 +1911,7 @@ boolean Acme::ReadAuthorizationReply(JsonObject &json) {
 
   free(order->status);
   order->status = strdup(acme_status_ready);	// Important note : advancing our local order to "ready"
-  ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply WriteOrderInfo() status %s", order->status);
+  ESP_LOGD(acme_tag, "Acme::ReadAuthorizationReply WriteOrderInfo() status %s", order->status);
   WriteOrderInfo();
   return true;
 }
