@@ -953,7 +953,7 @@ mbedtls_pk_context *Acme::ReadPrivateKey(const char *ifn) {
 void Acme::CreateDirectories(const char *path) {
   char *dir = strdup(path);
 
-  ESP_LOGI(acme_tag, "%s(%s)", __FUNCTION__, dir);
+  ESP_LOGD(acme_tag, "%s(%s)", __FUNCTION__, dir);
 
   // Walk from the beginning to the end of the path
 
@@ -968,14 +968,14 @@ void Acme::CreateDirectories(const char *path) {
       if (dp == 0) {
         int err = mkdir(dir, 0777);
         if (err == ESP_OK) {
-	  ESP_LOGI(acme_tag, "%s: created directory %s", __FUNCTION__, dir);
+	  ESP_LOGD(acme_tag, "%s: created directory %s", __FUNCTION__, dir);
         } else {
 	  ESP_LOGE(acme_tag, "%s: failed to create directory %s, %d %s", __FUNCTION__, dir,
 	    err, esp_err_to_name(err));
 	  return;
         }
       } else {
-        ESP_LOGI(acme_tag, "%s : %s exists", __FUNCTION__, dir);
+        ESP_LOGD(acme_tag, "%s : %s exists", __FUNCTION__, dir);
 	closedir(dp);
       }
 
