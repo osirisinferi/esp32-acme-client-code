@@ -572,16 +572,44 @@ char *Acme::Base64(const char *s, int len) {
 char *Acme::MakeMessageJWK(char *url, char *payload, char *jwk) {
   ESP_LOGD(acme_tag, "%s(%s,%s,%s)", __FUNCTION__, url, payload, jwk);
 
-  String p_rotected = String("{\"url\": \"") + url + "\", \"jwk\": " + jwk + ", \"alg\": \"RS256\", \"nonce\": \"" + nonce + "\"}";	// ? Fixed
-  String p_rotected64 = Base64(p_rotected.c_str());
-  ESP_LOGD(acme_tag, "PR %s", p_rotected.c_str());
-  String p_ayload = Base64(payload);
-  String s_ignature = Signature(p_rotected64, p_ayload);
+  int sz = 0;
+  char *p_rotected = 0;
 
-  String js = String("{\n  \"protected\": \"") + p_rotected64
-    + "\",\n  \"payload\": \"" + p_ayload + "\",\n  \"signature\": \"" + s_ignature + "\"\n}";
+  // First use snprintf to calculate size, then allocate, then actually make the message
+  // "{\"url\": \"%s\", \"jwk\": %s, \"alg\": \"RS256\", \"nonce\": \"%s\"}",
+  sz = snprintf(p_rotected, sz, acme_message_jwk_template1, url, jwk, nonce);
+  if (sz < 0)
+    return 0;
+  sz++;
+  p_rotected = (char *)malloc(sz);
+  // "{\"url\": \"%s\", \"jwk\": %s, \"alg\": \"RS256\", \"nonce\": \"%s\"}",
+  snprintf(p_rotected, sz, acme_message_jwk_template1, url, jwk, nonce);
+  ESP_LOGD(acme_tag, "p_rotected 2 (sz %d, len %d) %s", sz, strlen(p_rotected), p_rotected);
 
-  return strdup(js.c_str());
+  char *p_rotected64 = Base64(p_rotected);
+  free(p_rotected);
+  char *p_ayload = Base64(payload);
+  char *s_ignature = Signature(p_rotected64, p_ayload);
+
+  sz = 0;
+  char *js = 0;
+  // First use snprintf to calculate size, then allocate, then actually make the message
+  // "{\n  \"protected\": \"%s\",\n  \"payload\": \"%s\",\n  \"signature\": \"%s\"\n}",
+  sz = snprintf(js, sz, acme_message_jwk_template2, p_rotected64, p_ayload, s_ignature);
+  if (sz < 0) {
+    free(p_ayload);
+    free(s_ignature);
+    return 0;
+  }
+  sz++;
+  js = (char *)malloc(sz);
+  // "{\n  \"protected\": \"%s\",\n  \"payload\": \"%s\",\n  \"signature\": \"%s\"\n}",
+  snprintf(js, sz, acme_message_jwk_template2, p_rotected64, p_ayload, s_ignature);
+  free(p_ayload);
+  free(s_ignature);
+  ESP_LOGD(acme_tag, "js 2 (sz %d len %d) %s", sz, strlen(js), js);
+
+  return js;
 }
 
 /*
@@ -638,17 +666,19 @@ char *Acme::MakeJWK() {
  * This must be JSON Web Signature (see RFC 8555, §6.1).
  *
  * Parameters are already base64-url formatted
+ *
+ * Caller should free the result
  */
-String Acme::Signature(String pr, String pl) {
+char *Acme::Signature(const char *pr, const char *pl) {
   int ret;
   char buf[80];
 
-  ESP_LOGD(acme_tag, "PR %s", pr.c_str());
-  ESP_LOGD(acme_tag, "PL %s", pl.c_str());
+  ESP_LOGD(acme_tag, "PR %s", pr);
+  ESP_LOGD(acme_tag, "PL %s", pl);
 
-  int len = strlen(pr.c_str()) + strlen(pl.c_str()) + 4;
+  int len = strlen(pr) + strlen(pl) + 4;
   char *bb = (char *)malloc(len);
-  sprintf(bb, "%s.%s", pr.c_str(), pl.c_str());
+  sprintf(bb, "%s.%s", pr, pl);
   ESP_LOGD(acme_tag, "signing input (length %d) {%s}", strlen((char *)bb), bb);
 
   // Generate a digital signature
@@ -656,7 +686,7 @@ String Acme::Signature(String pr, String pl) {
   if (! signature) {
     ESP_LOGE(acme_tag, "calloc failed, mbedtls_pk_get_len %d", mbedtls_pk_get_len(accountkey));
     free(bb);
-    return (String)0;
+    return 0;
   }
   int hash_size = 32;
   unsigned char *hash = (unsigned char *)calloc(1, hash_size);
@@ -664,7 +694,7 @@ String Acme::Signature(String pr, String pl) {
     ESP_LOGE(acme_tag, "calloc(32) failed");
     free(signature);
     free(bb);
-    return (String)0;
+    return 0;
   }
 
   const mbedtls_md_info_t *mdi = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
@@ -672,7 +702,7 @@ String Acme::Signature(String pr, String pl) {
     ESP_LOGE("Acme", "mbedtls_hash_get_len: md_info not found");
     free(signature);
     free(hash);
-    return (String)0;
+    return 0;
   }
   ret = mbedtls_md(mdi, (const unsigned char *)bb, strlen(bb), (unsigned char *)hash);
   free(bb); bb = 0;
@@ -681,7 +711,7 @@ String Acme::Signature(String pr, String pl) {
     ESP_LOGE(acme_tag, "mbedtls_hash_fast failed %s (0x%04x)", buf, -ret);
     free(signature);
     free(hash);
-    return (String)0;
+    return 0;
   }
 
   size_t signature_size = 0;
@@ -691,7 +721,7 @@ String Acme::Signature(String pr, String pl) {
     ESP_LOGE(acme_tag, "mbedtls_pk_sign failed %s (0x%04x)", buf, -ret);
     free(signature);
     free(hash);
-    return (String)0;
+    return 0;
   }
 
   ESP_LOGD(acme_tag, "%s: signature size %d", __FUNCTION__, signature_size);
@@ -701,9 +731,7 @@ String Acme::Signature(String pr, String pl) {
   char *s = Base64((char *)signature, signature_size);
   free(signature);
 
-  String rs = String(s);
-  free(s);
-  return rs;
+  return s;
 }
 
 /***************************************************
@@ -965,6 +993,7 @@ void Acme::WritePrivateKey(mbedtls_pk_context *pk, const char *ifn) {
   int fnlen = strlen(filename_prefix) + strlen(ifn) + 3;
   char *fn = (char *)malloc(fnlen);
   sprintf(fn, "%s/%s", filename_prefix, ifn);
+  ESP_LOGE(acme_tag, "WritePrivateKey(%s)", fn);
 
   CreateDirectories(fn);
   FILE *f = fopen(fn, "w");
@@ -1653,6 +1682,7 @@ boolean Acme::ValidateOrder() {
   ESP_LOGD(acme_tag, "%s: token %s", __FUNCTION__, token);
 
   if (webserver == 0) {
+#if USE_EXTERNAL_WEBSERVER
     if (! (ftp_user && ftp_path && ftp_server && ftp_pass)) {
       ESP_LOGI(acme_tag, "%s: failed, incomplete FTP setup", __FUNCTION__);
       return false;
@@ -1680,6 +1710,9 @@ boolean Acme::ValidateOrder() {
     sprintf(remotefn, "%s%s%s", ftp_path, well_known, token);
 
     StoreFileOnWebserver(localfn, remotefn);
+#else
+#   warning "Not configured for external webserver"
+#endif
   } else {
     /*
      * The IoT device has a local web server.
@@ -1756,7 +1789,7 @@ boolean Acme::ValidateAlertServer() {
 
   free(msg);
   if (reply) {
-    ESP_LOGI(acme_tag, "PerformWebQuery -> %s", reply);
+    ESP_LOGE(acme_tag, "%s: PerformWebQuery -> %s", __FUNCTION__, reply);
   } else {
     ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
   }
@@ -1783,16 +1816,18 @@ boolean Acme::ValidateAlertServer() {
   } else if (reply_status == 0) {
     // ESP_LOGE(acme_tag, "%s: null reply_status", __FUNCTION__);
     ESP_LOGE(acme_tag, "%s: null reply_status (reply %s)", __FUNCTION__, reply);
+    free(reply);
+    return false;
   } else {
     ESP_LOGI(acme_tag, "%s: reply_status %s", __FUNCTION__, reply_status);
   }
 
-  free(reply);
-
   if (ReadAuthorizationReply(root)) {
+    free(reply);
     return true;
   } else {
     ESP_LOGE(acme_tag, "%s: failing", __FUNCTION__);
+    free(reply);
     return false;
   }
 }
@@ -1863,13 +1898,20 @@ void Acme::DownloadCertificate() {
  */
 boolean Acme::ReadAuthorizationReply(JsonObject &json) {
   const char *status = json[acme_json_status];
+  if (status == 0) {
+    ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply status (null)");
+    return false;
+  }
+  ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply status %s", status);
 
   if (strcmp(status, acme_status_valid) != 0) {
+    ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply invalid status, returning");
     return false;
   }
 
   free(order->status);
   order->status = strdup(acme_status_ready);	// Important note : advancing our local order to "ready"
+  ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply WriteOrderInfo() status %s", order->status);
   WriteOrderInfo();
   return true;
 }
@@ -2114,14 +2156,26 @@ char *Acme::MakeMessageKID(const char *url, const char *payload) {
     return 0;
 
   ESP_LOGD(acme_tag, "PR %s", prot);
-  String pr = Base64(prot);
-  String pl = Base64(payload);
-  String sig = Signature(pr, pl);
+  char *pr = Base64(prot);
+  char *pl = Base64(payload);
+  char *sig = Signature(pr, pl);
 
-  String js = String("{\n  \"protected\": \"") + pr + "\",\n  \"payload\": \"" + pl + "\",\n  \"signature\": \"" + sig + "\"\n}";
+  char *js = 0;
+  int sz = 0;
+
+  // "{\n  \"protected\": \"%s\",\n  \"payload\": \"%s\",\n  \"signature\": \"%s\"\n}",
+  sz = snprintf(js, sz, acme_message_kid_template, pr, pl, sig);
+  if (sz < 0)
+    return 0;
+  sz++;
+  js = (char *)malloc(sz);
+  snprintf(js, sz, acme_message_kid_template, pr, pl, sig);
   free(prot);
+  free(pr);
+  free(pl);
+  free(sig);
 
-  return strdup(js.c_str());
+  return js;
 }
 
 void Acme::SetAcmeUserAgentHeader(esp_http_client_handle_t client) {
@@ -2325,6 +2379,7 @@ esp_err_t Acme::HttpEvent(esp_http_client_event_t *event) {
  *
  */
 void Acme::StoreFileOnWebserver(char *localfn, char *remotefn) {
+#if USE_EXTERNAL_WEBSERVER
   NetBuf_t	*nb = 0;
 
   if (! (ftp_user && ftp_path && ftp_server && ftp_pass)) {
@@ -2346,9 +2401,11 @@ void Acme::StoreFileOnWebserver(char *localfn, char *remotefn) {
     ftpc->ftpClientPut(localfn, remotefn, FTP_CLIENT_BINARY, nb);
   }
   ftpc->ftpClientQuit(nb);
+#endif
 }
 
 void Acme::RemoveFileFromWebserver(char *remotefn) {
+#if USE_EXTERNAL_WEBSERVER
   NetBuf_t	*nb = 0;
 
   if (! (ftp_user && ftp_path && ftp_server && ftp_pass)) {
@@ -2370,6 +2427,7 @@ void Acme::RemoveFileFromWebserver(char *remotefn) {
     ftpc->ftpClientDelete(remotefn, nb);
   }
   ftpc->ftpClientQuit(nb);
+#endif
 }
 
 void Acme::OrderRemove(char *dir) {

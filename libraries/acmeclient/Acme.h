@@ -33,7 +33,9 @@
 #include <sys/socket.h>
 #include <esp_event_loop.h>
 #include <esp_http_client.h>
+#if USE_EXTERNAL_WEBSERVER
 #include <FtpClient.h>
+#endif
 #include <esp_http_server.h>
 
 #include "mbedtls/entropy.h"
@@ -163,6 +165,12 @@ class Acme {
     const char *csr_template =
       "{\n\t\"resource\" : \"new-authz\",\n\t\"identifier\" :\n\t{\n\t\t\"type\" : \"dns\",\n\t\t\"value\" : \"%s\"\n\t}\n}";
     const char *csr_format = "{ \"csr\" : \"%s\" }";
+    const char *acme_message_jwk_template1 =
+      "{\"url\": \"%s\", \"jwk\": %s, \"alg\": \"RS256\", \"nonce\": \"%s\"}";
+    const char *acme_message_jwk_template2 =
+      "{\n  \"protected\": \"%s\",\n  \"payload\": \"%s\",\n  \"signature\": \"%s\"\n}";
+    const char *acme_message_kid_template =
+      "{\n  \"protected\": \"%s\",\n  \"payload\": \"%s\",\n  \"signature\": \"%s\"\n}";
 
     // These are needed in static member functions
     // We scan HTTP headers in replies for these :
@@ -192,7 +200,7 @@ class Acme {
     char	*Base64(const char *);
     char	*Base64(const char *, int);
     char	*Unbase64(const char *s);
-    String	Signature(String, String);
+    char	*Signature(const char *, const char *);
     char	*MakeMessageJWK(char *url, char *payload, char *jwk);
     char	*MakeJWK();
     char	*MakeMessageKID(const char *url, const char *payload);
