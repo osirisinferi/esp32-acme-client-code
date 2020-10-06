@@ -1402,8 +1402,8 @@ void Acme::WriteAccountInfo() {
 
   fprintf(f, "%s", output);
   fclose(f);
-  ESP_LOGI(acme_tag, "Wrote %d bytes of JSON account info", strlen(output));
-  ESP_LOGI(acme_tag, "Account info : %s", output);
+  ESP_LOGD(acme_tag, "Wrote %d bytes of JSON account info", strlen(output));
+  ESP_LOGD(acme_tag, "Account info : %s", output);
   free(output);
 }
 
@@ -1595,8 +1595,8 @@ void Acme::WriteOrderInfo() {
 
   fprintf(f, "%s", output);
   fclose(f);
-  ESP_LOGI(acme_tag, "Wrote %d bytes of JSON order info", strlen(output));
-  ESP_LOGI(acme_tag, "Order info : %s", output);
+  ESP_LOGD(acme_tag, "Wrote %d bytes of JSON order info", strlen(output));
+  ESP_LOGD(acme_tag, "Order info : %s", output);
   free(output);
 }
 
@@ -1833,17 +1833,17 @@ boolean Acme::ValidateAlertServer() {
 }
 
 void Acme::DownloadCertificate() {
-  ESP_LOGI(acme_tag, "%s(%s)", __FUNCTION__, order->certificate);
+  ESP_LOGD(acme_tag, "%s(%s)", __FUNCTION__, order->certificate);
 
   char *msg = MakeMessageKID(order->certificate, "");
 
-  ESP_LOGI(acme_tag, "%s: PerformWebQuery(%s,%s,%s,%s)", __FUNCTION__, order->certificate, msg, acme_jose_json, acme_accept_pem_chain);
+  ESP_LOGD(acme_tag, "%s: PerformWebQuery(%s,%s,%s,%s)", __FUNCTION__, order->certificate, msg, acme_jose_json, acme_accept_pem_chain);
 
   char *reply = PerformWebQuery(order->certificate, msg, acme_jose_json, acme_accept_pem_chain);
 
   free(msg);
   if (reply) {
-    ESP_LOGI(acme_tag, "PerformWebQuery -> %s", reply);
+    ESP_LOGD(acme_tag, "PerformWebQuery -> %s", reply);
   } else {
     ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
   }
@@ -2267,7 +2267,7 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
       ESP_LOGE(acme_tag, "%s: client_set_header(%s=%s) error %d %s", __FUNCTION__, acme_accept_header, accept_message, err, esp_err_to_name(err));
       // Don't fail on this.
     } else {
-      ESP_LOGI(acme_tag, "Client_set_header(%s=%s)", acme_accept_header, accept_message);
+      ESP_LOGD(acme_tag, "Client_set_header(%s=%s)", acme_accept_header, accept_message);
     }
   }
 
