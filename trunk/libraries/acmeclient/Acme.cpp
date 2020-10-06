@@ -1434,7 +1434,7 @@ void Acme::RequestNewOrder(const char *url) {
   char *msg;
   char *request = (char *)malloc(strlen(new_order_template) + strlen(url) + 4);
   sprintf(request, new_order_template, url);
-  ESP_LOGI(acme_tag, "%s msg %s", __FUNCTION__, request);
+  ESP_LOGD(acme_tag, "%s msg %s", __FUNCTION__, request);
 
   msg = MakeMessageKID(directory->newOrder, request);
 
@@ -2149,7 +2149,7 @@ void Acme::ReadChallenge(JsonObject &json) {
  *  "n": "...", "e": "AQAB"}, "alg": "RS256", "nonce": "U8b_2ZGRATuySa9yPOF3JDN4JXTyEdAfrL--WTzqYKQ"}
  */
 char *Acme::MakeMessageKID(const char *url, const char *payload) {
-  ESP_LOGI(acme_tag, "%s(%s,%s)", __FUNCTION__, url, payload);
+  ESP_LOGD(acme_tag, "%s(%s,%s)", __FUNCTION__, url, payload);
 
   char *prot = MakeProtectedKID(url);
   if (prot == 0)
@@ -2542,7 +2542,7 @@ void Acme::FinalizeOrder() {
 
   free(msg);
   if (reply) {
-    ESP_LOGI(acme_tag, "%s: PerformWebQuery -> %s", __FUNCTION__, reply);
+    ESP_LOGD(acme_tag, "%s: PerformWebQuery -> %s", __FUNCTION__, reply);
   } else {
     ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
   }
