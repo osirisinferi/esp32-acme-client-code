@@ -310,14 +310,14 @@ void Acme::AcmeProcess() {
     return;
   }
 
-  ESP_LOGI(acme_tag, "%s", __FUNCTION__);
+  ESP_LOGD(acme_tag, "%s", __FUNCTION__);
 
   if (account == 0) {
     ESP_LOGI(acme_tag, "%s account 0", __FUNCTION__);
     if (! ReadAccountInfo()) {
-      ESP_LOGI(acme_tag, "%s requesting new account", __FUNCTION__);
+      ESP_LOGD(acme_tag, "%s requesting new account", __FUNCTION__);
       RequestNewAccount(email_address, true);
-      ESP_LOGI(acme_tag, "%s writing new account", __FUNCTION__);
+      ESP_LOGD(acme_tag, "%s writing new account", __FUNCTION__);
       WriteAccountInfo();
     }
     if (account == 0) {
@@ -327,24 +327,24 @@ void Acme::AcmeProcess() {
   }
 
   if (order == 0) {	// We haven't read storage yet, and we've not been kickstarted by the application.
-    ESP_LOGI(acme_tag, "%s Read order info", __FUNCTION__);
+    ESP_LOGD(acme_tag, "%s Read order info", __FUNCTION__);
     ReadOrderInfo();
   }
   if (order == 0)
     return;		// Return silently
 
   if (order->status == 0) {
-    ESP_LOGI(acme_tag, "%s order status 0", __FUNCTION__);
+    ESP_LOGD(acme_tag, "%s order status 0", __FUNCTION__);
     ReadOrderInfo();
     if (order == 0 || order->status == 0) {
-      ESP_LOGI(acme_tag, "%s request new order", __FUNCTION__);
+      ESP_LOGD(acme_tag, "%s request new order", __FUNCTION__);
       RequestNewOrder(acme_url);
       WriteOrderInfo();
       return;
     }
   }
   if (order->status == 0) {
-    ESP_LOGI(acme_tag, "%s order status 0+", __FUNCTION__);
+    ESP_LOGD(acme_tag, "%s order status 0", __FUNCTION__);
     return;
   }
 
