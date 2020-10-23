@@ -37,6 +37,7 @@ class Dyndns {
 public:
   Dyndns();
   Dyndns(dyndns_provider);
+  Dyndns(const char *);
   ~Dyndns();
   boolean update();
   void setHostname(const char *);
