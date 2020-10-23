@@ -87,6 +87,23 @@ Dyndns::Dyndns(dyndns_provider p) {
   __dyndns = this;
 }
 
+Dyndns::Dyndns(const char *p) {
+  memset(&http_config, 0, sizeof(http_config));
+  http_config.event_handler = _http_event_handler;
+
+  hostname = ip = auth = buf = 0;
+
+  __dyndns = this;
+
+  if (strcasecmp(p, "cloudns.net") == 0 || strcasecmp(p, "cloudns") == 0)
+    provider = DD_CLOUDNS;
+  else if (strcasecmp(p, "noip") == 0 || strcasecmp(p, "no-ip") == 0
+        || strcasecmp(p, "noip.com") == 0 || strcasecmp(p, "no-ip.com") == 0)
+    provider = DD_NOIP;
+  else
+    provider = DD_UNKNOWN;
+}
+
 Dyndns::~Dyndns() {
 }
 
