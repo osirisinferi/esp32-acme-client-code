@@ -11,7 +11,7 @@
  * We're implementing ACME v2 (RFC 8555), which has status "proposed standard".
  * ACME v1 has risks and should be avoided.
  *
- * Copyright (c) 2019, 2020 Danny Backx
+ * Copyright (c) 2019, 2020, 2021 Danny Backx
  *
  * License (MIT license):
  *   Permission is hereby granted, free of charge, to any person obtaining a copy

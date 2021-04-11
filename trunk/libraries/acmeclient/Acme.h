@@ -2,7 +2,7 @@
  * This module implements the ACME (Automated Certicifate Management Environment) protocol.
  * A client for Let's Encrypt (https://letsencrypt.org).
  *
- * Copyright (c) 2019, 2020 Danny Backx
+ * Copyright (c) 2019, 2020, 2021 Danny Backx
  *
  * License (MIT license):
  *   Permission is hereby granted, free of charge, to any person obtaining a copy
