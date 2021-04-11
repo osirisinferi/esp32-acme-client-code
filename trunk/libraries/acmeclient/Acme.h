@@ -73,8 +73,8 @@ class Acme {
     void setWebServer(httpd_handle_t);
 
     void loop(time_t now);
-    boolean HaveValidCertificate(time_t);
-    boolean HaveValidCertificate();
+    bool HaveValidCertificate(time_t);
+    bool HaveValidCertificate();
 
     // Private keys
     void GenerateAccountKey();
@@ -84,7 +84,7 @@ class Acme {
     void setAccountKey(mbedtls_pk_context *ak);
     void setCertificateKey(mbedtls_pk_context *ck);
 
-    boolean CreateNewAccount();
+    bool CreateNewAccount();
     void AcmeProcess();				// Run the ACME client FSM (finite state machine)
     mbedtls_x509_crt *getCertificate();
 
@@ -211,11 +211,11 @@ class Acme {
     char	*PerformWebQuery(const char *, const char *, const char *, const char *accept_msg);
 
     void	QueryAcmeDirectory();
-    boolean	RequestNewNonce();
+    bool	RequestNewNonce();
     void	ClearDirectory();
 
     mbedtls_pk_context	*GeneratePrivateKey();
-    boolean	ReadPrivateKey();
+    bool	ReadPrivateKey();
     mbedtls_pk_context	*ReadPrivateKey(const char *fn);
     void	WritePrivateKey();
     void	WritePrivateKey(const char *);
@@ -223,8 +223,8 @@ class Acme {
     void	ReadAccountKey();
     void	ReadCertKey();
 
-    boolean	RequestNewAccount(const char *contact, boolean onlyExisting);
-    boolean	ReadAccountInfo();
+    bool	RequestNewAccount(const char *contact, bool onlyExisting);
+    bool	ReadAccountInfo();
     void	WriteAccountInfo();
     void	ReadAccount(JsonObject &);
     void	ClearAccount();
@@ -232,11 +232,11 @@ class Acme {
     void	RequestNewOrder(const char *url);
     void	ClearOrder();
     void	ClearOrderContent();
-    boolean	ReadOrderInfo();
+    bool	ReadOrderInfo();
     void	WriteOrderInfo();
     void	ReadOrder(JsonObject &);
-    boolean	ValidateOrder();
-    boolean	ValidateAlertServer();
+    bool	ValidateOrder();
+    bool	ValidateAlertServer();
     void	EnableLocalWebServer();
     void	DisableLocalWebServer();
 
@@ -244,7 +244,7 @@ class Acme {
     bool	CreateValidationFile(const char *localfn, const char *token);
     char	*CreateValidationString(const char *token);
     void	ReadChallenge(JsonObject &);
-    boolean	ReadAuthorizationReply(JsonObject &json);
+    bool	ReadAuthorizationReply(JsonObject &json);
     void	ClearChallenge();
 
     void	FinalizeOrder();
@@ -279,7 +279,7 @@ class Acme {
 
     int		http01_ix;
     time_t	last_run;
-    boolean	connected;
+    bool	connected;
 
     mbedtls_rsa_context		*rsa;
     mbedtls_ctr_drbg_context	*ctr_drbg;
@@ -294,7 +294,7 @@ class Acme {
     char		*ValidationString;	// The string to reply to the ACME server
     char		*ValidationFile;	// File name that must be queried
     httpd_uri_t		*wsconf;
-    boolean		ws_registered;
+    bool		ws_registered;
     char		*ovf;
 
     /*
@@ -310,7 +310,7 @@ class Acme {
     struct Account {			// See ACME RFC § 7.1.2
       char	*status;
       char	**contact;
-      boolean	termsOfServiceAgreed;
+      bool	termsOfServiceAgreed;
       char	*orders;
       char	*key_type, *key_id, *key_e;
       char	*initialIp,
