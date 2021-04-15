@@ -575,6 +575,9 @@ char *Acme::MakeMessageJWK(char *url, char *payload, char *jwk) {
   int sz = 0;
   char *p_rotected = 0;
 
+  if (nonce == 0)
+    return 0;
+
   // First use snprintf to calculate size, then allocate, then actually make the message
   // "{\"url\": \"%s\", \"jwk\": %s, \"alg\": \"RS256\", \"nonce\": \"%s\"}",
   sz = snprintf(p_rotected, sz, acme_message_jwk_template1, url, jwk, nonce);
@@ -2277,7 +2280,7 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
     err = esp_http_client_perform(client);
 
     // Ok, now the data has been captured in Acme::HttpEvent, just pass it on and finish up.
-    ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, buf);
+    // ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, buf);
 
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
