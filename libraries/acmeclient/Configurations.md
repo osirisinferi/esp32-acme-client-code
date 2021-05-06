@@ -77,6 +77,8 @@ The IP address on line 10 should be the IP address of the IoT device, and the po
 
 For more information, see e.g. <a href="https://unix.stackexchange.com/questions/290223/how-to-configure-nginx-as-a-reverse-proxy-for-different-port-numbers">this</a>, or <a href="https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/">that</a> article.
 
+Note that the nginx should be set to forward traffic on port 80 (normal http traffic) but not https traffic (port 443). Normal http traffic is used in the ACME protocol to verify things (read <a href="https://tools.ietf.org/html/rfc8555">the RFC</a> if you want to know more). The web server - or other services - that will use/deploy the certificate should not be forwarded using the technique above because then outside clients will get the certificate of the server running the nginx (that's who they connect to) instead of the certificate of our device.
+
 ### Local Web Server
 
 ### Web Server accessible via FTP
