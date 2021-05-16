@@ -58,6 +58,7 @@ class Acme {
 
     // Getters / setters
     void setUrl(const char *);
+    void setAltUrl(const int ix, const char *fn);
     void setEmail(const char *);
     void setAcmeServer(const char *);
     void setAccountFilename(const char *);
@@ -85,7 +86,7 @@ class Acme {
     void setCertificateKey(mbedtls_pk_context *ck);
 
     bool CreateNewAccount();
-    void AcmeProcess();				// Run the ACME client FSM (finite state machine)
+    void AcmeProcess(time_t);			// Run the ACME client FSM (finite state machine)
     mbedtls_x509_crt *getCertificate();
 
     void CreateNewOrder();
@@ -96,6 +97,8 @@ class Acme {
     void OrderStart();				// Debug
     void ChallengeStart();			// Debug
 
+    void ProcessStepByStep(bool);
+
   private:
     constexpr const static char *acme_tag = "Acme";	// For ESP_LOGx calls
 
@@ -103,6 +106,8 @@ class Acme {
     const char *cert_key_fn;			// Certificate private key filename
     const char *email_address;			// Email address in the account
     const char *acme_url;			// URL for which we're getting a certificate
+    const char **alt_urls;			// URL for which we're getting a certificate
+    int alt_url_cnt;
     const char *acme_server_url;		// ACME server
     const char *filename_prefix;		// e.g. /spiffs
     const char *account_fn;			// Account status json filename, e.g. "account.json"
@@ -162,6 +167,10 @@ class Acme {
       "{\n  \"termsOfServiceAgreed\": true,\n  \"resource\": [\n    \"new-reg\"\n  ]\n}";
     const char *new_order_template =
       "{\n  \"identifiers\": [\n    {\n      \"type\": \"dns\", \"value\": \"%s\"\n    }\n  ]\n}";
+    const char *new_order_template2 =
+      "{\n  \"identifiers\": [\n    %s  ]\n}";
+    const char *new_order_subtemplate =
+      "{ \"type\": \"dns\", \"value\": \"%s\" }\n";
     const char *csr_template =
       "{\n\t\"resource\" : \"new-authz\",\n\t\"identifier\" :\n\t{\n\t\t\"type\" : \"dns\",\n\t\t\"value\" : \"%s\"\n\t}\n}";
     const char *csr_format = "{ \"csr\" : \"%s\" }";
@@ -186,6 +195,7 @@ class Acme {
 
     // These store the info obtained in one of the static member functions
     void setNonce(char *);
+    char *GetNonce();
     void setLocation(const char *);
 
     // Helper functions
@@ -230,6 +240,7 @@ class Acme {
     void	ClearAccount();
 
     void	RequestNewOrder(const char *url);
+    void	RequestNewOrder(const char *url, const char **alt_urls);
     void	ClearOrder();
     void	ClearOrderContent();
     bool	ReadOrderInfo();
@@ -272,6 +283,7 @@ class Acme {
     Challenge	*challenge;
 
     char	*nonce;
+    int		nonce_use;
     // char	*location;	// moved to Account
     char	*account_location;
     char	*reply_buffer;
@@ -347,6 +359,26 @@ class Acme {
       time_t		t_expires;
       ChallengeItem	*challenges;
     };
+
+    /*
+     * Debug : process AcmeProcess step by step
+     */
+    bool		stepByStep;
+    int			step;
+    time_t		stepTime;
+
+    void ProcessStep(int);
+    bool _ProcessCheck(int);
+    bool _ProcessDelay(time_t);
+
+    const int ACME_STEP_NONE		= 0;
+    const int ACME_STEP_ACCOUNT		= 10;
+    const int ACME_STEP_ORDER		= 20;
+    const int ACME_STEP_CHALLENGE	= 30;
+    const int ACME_STEP_ORDER2		= 40;
+    const int ACME_STEP_VALIDATE	= 50;
+    const int ACME_STEP_FINALIZE	= 60;
+    const int ACME_STEP_DOWNLOAD	= 70;
 };
 
 extern Acme *acme;

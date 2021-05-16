@@ -66,6 +66,7 @@ Acme::Acme() {
   certificate = 0;
 
   acme_url = 0;
+  alt_urls = 0;
   email_address = 0;
   acme_server_url = 0;
   account_fn = 0;
@@ -263,7 +264,7 @@ void Acme::NetworkDisconnected(void *ctx, system_event_t *event) {
  */
 void Acme::loop(time_t now) {
   if (order) {
-    AcmeProcess();
+    AcmeProcess(now);
     return;		// FIXME ? Only look into renewal if we're not processing here.
   }
 
@@ -286,6 +287,60 @@ void Acme::loop(time_t now) {
 }
 
 /*
+ * Some methods and macros to slow down the process.
+ * ProcessStep and ProcessCheck make AcmeProcess return after a functional step.
+ * ProcessDelay will delay to start a next AcmeProcess until the time set is reached.
+ */
+void Acme::ProcessStepByStep(bool s) {
+  stepByStep = s;
+}
+
+void Acme::ProcessStep(int s) {
+  step = s;
+}
+
+bool Acme::_ProcessCheck(int s) {
+  if (stepByStep && (step == s)) {
+    ESP_LOGE(acme_tag, "%s step %d achieved, returning", __FUNCTION__, step);
+    return true;
+  }
+  return false;
+}
+
+bool Acme::_ProcessDelay(time_t now) {
+  // Don't delay unless stepByStep is set
+  if (! stepByStep)
+    return false;
+
+  // Test conditions
+  if (now < stepTime + 10) {
+    return true;			// don't run AcmeProcess just yet
+  }
+  stepTime = 0;				// reached target time, reset that flag
+
+  // No need to delay, run run run
+  return false;
+}
+
+/*
+ * We need these macros to be able to return from the AcmeProcess function.
+ * So _ProcessCheck will return true to make ProcessCheck cause a return in AcmeProcess.
+ */
+#define	ProcessCheck(s)			\
+  {					\
+    if (_ProcessCheck(s)) {		\
+      stepTime = now;			\
+      return;				\
+    }					\
+  }
+
+#define	ProcessDelay(n)			\
+  {					\
+    if (stepTime && _ProcessDelay(n))	\
+      return;				\
+  }
+
+/*
  * This runs the engine to reacquire a certificate.
  * RFC 8555 describes the states the server objects can be in; the client side must match that,
  * but also keep track of a couple of other state aspects :
@@ -297,7 +352,10 @@ void Acme::loop(time_t now) {
  */
 static int process_count = 5;
 
-void Acme::AcmeProcess() {
+void Acme::AcmeProcess(time_t now) {
+  ProcessStep(ACME_STEP_NONE);
+  ProcessDelay(now);
+
   /*
    * Note keep the two checks in this order.
    * If directory == 0 we only print limited number of error messages.
@@ -313,6 +371,8 @@ void Acme::AcmeProcess() {
   ESP_LOGD(acme_tag, "%s", __FUNCTION__);
 
   if (account == 0) {
+    ProcessStep(ACME_STEP_ACCOUNT);
+
     ESP_LOGI(acme_tag, "%s account 0", __FUNCTION__);
     if (! ReadAccountInfo()) {
       ESP_LOGD(acme_tag, "%s requesting new account", __FUNCTION__);
@@ -325,6 +385,7 @@ void Acme::AcmeProcess() {
       return;
     }
   }
+  ProcessCheck(ACME_STEP_ACCOUNT);
 
   if (order == 0) {	// We haven't read storage yet, and we've not been kickstarted by the application.
     ESP_LOGD(acme_tag, "%s Read order info", __FUNCTION__);
@@ -334,11 +395,13 @@ void Acme::AcmeProcess() {
     return;		// Return silently
 
   if (order->status == 0) {
+    ProcessStep(ACME_STEP_ORDER);
     ESP_LOGD(acme_tag, "%s order status 0", __FUNCTION__);
     ReadOrderInfo();
     if (order == 0 || order->status == 0) {
       ESP_LOGD(acme_tag, "%s request new order", __FUNCTION__);
-      RequestNewOrder(acme_url);
+      // RequestNewOrder(acme_url);
+      RequestNewOrder(acme_url, alt_urls);
       WriteOrderInfo();
       return;
     }
@@ -347,35 +410,49 @@ void Acme::AcmeProcess() {
     ESP_LOGD(acme_tag, "%s order status 0", __FUNCTION__);
     return;
   }
+  ProcessCheck(ACME_STEP_ORDER);
 
   // Check deeper
   boolean invalid = false;
   if (challenge && strcmp(challenge->status, acme_status_invalid) == 0) {
+    ProcessStep(ACME_STEP_CHALLENGE);
     ESP_LOGE(acme_tag, "%s : %s challenge, starting a new order", __FUNCTION__, acme_status_invalid);
     invalid = true;
-  } else if (challenge && challenge->challenges)
+  } else if (challenge && challenge->challenges) {
+    ProcessStep(ACME_STEP_CHALLENGE);
     for (int i=0; challenge->challenges[i].status; i++)
       if (strcmp(challenge->challenges[i].status, acme_status_invalid) == 0) {
 	ESP_LOGE(acme_tag, "%s : %s challenge[%d], starting a new order", __FUNCTION__, acme_status_invalid, i);
         invalid = true;
 	break;
       }
+  }
+  ProcessCheck(ACME_STEP_CHALLENGE);
 
   if (invalid) {
-    RequestNewOrder(acme_url);
+    ProcessStep(ACME_STEP_ORDER2);
+    // RequestNewOrder(acme_url);
+    RequestNewOrder(acme_url, alt_urls);
     WriteOrderInfo();
     return;
   }
+  ProcessCheck(ACME_STEP_ORDER2);
 
   if (strcmp(order->status, acme_status_pending) == 0) {
+    ProcessStep(ACME_STEP_VALIDATE);
     boolean ok = ValidateOrder();
     ESP_LOGI(acme_tag, "%s: ValidateOrder -> %s", __FUNCTION__, ok ? "ok" : "fail");
     WriteOrderInfo();
   }
+  ProcessCheck(ACME_STEP_VALIDATE);
+
   if (strcmp(order->status, acme_status_ready) == 0) {
+    ProcessStep(ACME_STEP_FINALIZE);
     FinalizeOrder();
     WriteOrderInfo();
   }
+  ProcessCheck(ACME_STEP_FINALIZE);
+
   if (strcmp(order->status, acme_status_processing) == 0) {
     ;
   }
@@ -388,6 +465,7 @@ void Acme::AcmeProcess() {
     }
   }
   if (strcmp(order->status, acme_status_valid) == 0) {
+    ProcessStep(ACME_STEP_DOWNLOAD);
     if (order->certificate) {
       DownloadCertificate();
       WriteOrderInfo();
@@ -400,9 +478,12 @@ void Acme::AcmeProcess() {
     order->status = strdup(acme_status_downloaded);		// an additional status
     WriteOrderInfo();
   }
+  ProcessCheck(ACME_STEP_DOWNLOAD);
+
   if (strcmp(order->status, acme_status_invalid) == 0) {
     // Something went wrong with this order, need to restart a new order
-    RequestNewOrder(acme_url);
+    // RequestNewOrder(acme_url);
+    RequestNewOrder(acme_url, alt_urls);
     WriteOrderInfo();
 
     if (ws_registered)
@@ -575,18 +656,19 @@ char *Acme::MakeMessageJWK(char *url, char *payload, char *jwk) {
   int sz = 0;
   char *p_rotected = 0;
 
-  if (nonce == 0)
+  char *my_nonce = GetNonce();
+  if (my_nonce == 0)
     return 0;
 
   // First use snprintf to calculate size, then allocate, then actually make the message
   // "{\"url\": \"%s\", \"jwk\": %s, \"alg\": \"RS256\", \"nonce\": \"%s\"}",
-  sz = snprintf(p_rotected, sz, acme_message_jwk_template1, url, jwk, nonce);
+  sz = snprintf(p_rotected, sz, acme_message_jwk_template1, url, jwk, my_nonce);
   if (sz < 0)
     return 0;
   sz++;
   p_rotected = (char *)malloc(sz);
   // "{\"url\": \"%s\", \"jwk\": %s, \"alg\": \"RS256\", \"nonce\": \"%s\"}",
-  snprintf(p_rotected, sz, acme_message_jwk_template1, url, jwk, nonce);
+  snprintf(p_rotected, sz, acme_message_jwk_template1, url, jwk, my_nonce);
   ESP_LOGD(acme_tag, "p_rotected 2 (sz %d, len %d) %s", sz, strlen(p_rotected), p_rotected);
 
   char *p_rotected64 = Base64(p_rotected);
@@ -830,9 +912,12 @@ boolean Acme::RequestNewNonce() {
   }
 
   if (nonce) {
+    ESP_LOGE(acme_tag, "%s but nonce present (%s)", __FUNCTION__, nonce);
+
     free(nonce);
     nonce = 0;
-  }
+  } else
+    ESP_LOGE(acme_tag, "%s", __FUNCTION__);
 
   if (directory->newNonce == 0) {
     ESP_LOGE(acme_tag, "%s: we have no newNonce URL", __FUNCTION__);
@@ -866,8 +951,18 @@ boolean Acme::RequestNewNonce() {
   esp_http_client_close(client);
   esp_http_client_cleanup(client);
 
+  nonce_use = 0;
+
   // It should already be there, so report back
   return (nonce != 0);
+}
+
+char *Acme::GetNonce() {
+  nonce_use++;
+  if (nonce_use == 1)
+    return nonce;
+  ESP_LOGE(acme_tag, "%s: nonce_use %d", __FUNCTION__, nonce_use);
+  return NULL;
 }
 
 esp_err_t Acme::NonceHttpEvent(esp_http_client_event_t *event) {
@@ -886,8 +981,9 @@ void Acme::setNonce(char *s) {
   if (nonce)
     free(nonce);
   nonce = strdup(s);
+  nonce_use = 0;
 
-  ESP_LOGD(acme_tag, "%s(%s)", __FUNCTION__, nonce);
+  ESP_LOGE(acme_tag, "%s(%s)", __FUNCTION__, nonce);
 }
 
 // This is needed because the location field is passed back in an HTTP header
@@ -1251,6 +1347,11 @@ void Acme::ClearAccount() {
 }
 
 void Acme::ClearOrderContent() {
+  if (order == 0) {
+    order = (Order *)malloc(sizeof(Order));
+    memset((void *)order, 0, sizeof(Order));
+    return;
+  }
   if (order->status) free(order->status);
   if (order->expires) free(order->expires);
   if (order->finalize) free(order->finalize);
@@ -1413,6 +1514,118 @@ void Acme::WriteAccountInfo() {
 /*
  *
  */
+void Acme::RequestNewOrder(const char *url, const char **alt_urls) {
+  // ESP_LOGI(acme_tag, "%s (%s)", __FUNCTION__, url);
+  {
+    char line[180];
+    sprintf(line, "%s", url);
+    for (int i=0; alt_urls && alt_urls[i]; i++) {
+      int pos = strlen(line);
+      snprintf(&line[pos], sizeof(line)-pos, ", %s", alt_urls[i]);
+    }
+    ESP_LOGI(acme_tag, "%s(%s) [Nonce %s use %d]", __FUNCTION__, line, nonce, nonce_use);
+  }
+  // ESP_LOGE(acme_tag, "%s %d", __FUNCTION__, __LINE__);
+
+  if (alt_urls == 0) {
+    RequestNewOrder(url);
+    return;
+  }
+
+  ClearOrderContent();
+  ClearChallenge();
+  /*
+   * prot :
+   *  {"alg": "RS256", "nonce": "webIkLvTEpwjbA9rZSTv8", "kid": "https://acme-staging-v02.api.letsencrypt.org/acme/acct/0123", "url": "https://acme-staging-v02.api.letsencrypt.org/acme/new-order"}
+   * pl :
+   *  {\n  "identifiers": [\n    {\n      "value": "to.org",\n      "type": "dns"\n    }\n  ]\n}
+   * 
+   * Sending POST request to https://acme-staging-v02.api.letsencrypt.org/acme/new-order:
+   * {
+   *   "signature": "CSrJ8AspnxgA4lq6mx43Aiwi-GJxyXw",
+   *   "protected": "ovL2FjbWUtc3RhZ2luZy12MDIuYXBpLmxldHNlbmNyeXB0Lm9yZy9hY21lL25ldy1vcmRlciJ9",
+   *   "payload": "ewiZG5zIgogICAgfQogIF0KfQ"
+   * }
+   * 2019-07-31 04:01:52,543:DEBUG:requests.packages.urllib3.connectionpool:https://acme-staging-v02.api.letsencrypt.org:443 "POST /acme/new-order HTTP/1.1" 201 36
+   */
+  if (directory == 0 || rsa == 0)
+    return;
+
+  char *msg;
+  int request_len = strlen(new_order_template2) + strlen(url) + strlen(new_order_subtemplate)+ 4;
+  for (int i=0; alt_urls[i]; i++)
+    request_len += strlen(alt_urls[i]) + strlen(new_order_subtemplate) + 4;
+  char *request1 = (char *)malloc(request_len);
+  request1[0] = 0;
+  int pos = 0;
+  sprintf(&request1[pos], new_order_subtemplate, url);
+  pos = strlen(request1);
+  request1[pos++] = ',';
+  request1[pos++] = ' ';
+  request1[pos] = 0;
+  for (int i=0; alt_urls[i]; i++) {
+    sprintf(&request1[pos], new_order_subtemplate, alt_urls[i]);
+    pos = strlen(request1);
+    if (alt_urls[i+1]) {
+      request1[pos++] = ',';
+      request1[pos++] = ' ';
+      request1[pos] = 0;
+    }
+  }
+  char *request2 = (char *)malloc(request_len);
+  sprintf(request2, new_order_template2, request1);
+  free((void *)request1);
+  ESP_LOGD(acme_tag, "%s msg %s", __FUNCTION__, request2);
+
+  msg = MakeMessageKID(directory->newOrder, request2);
+  free((void *)request2);
+
+  if (! msg) {
+    ESP_LOGE(acme_tag, "%s: null message", __FUNCTION__);
+    return;
+  }
+  ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, msg);
+
+  char *reply = PerformWebQuery(directory->newOrder, msg, acme_jose_json, 0);
+  // free(msg);
+  if (reply) {
+    ESP_LOGD(acme_tag, "PerformWebQuery -> %s", reply);
+  } else {
+    ESP_LOGE(acme_tag, "PerformWebQuery -> null");
+  }
+
+  // Decode JSON reply
+  DynamicJsonBuffer jb;
+  JsonObject &root = jb.parseObject(reply);
+  if (! root.success()) {
+    ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
+    free(reply);
+    return;
+  }
+  ESP_LOGD(acme_tag, "%s : JSON opened", __FUNCTION__);
+
+  const char *reply_status = root[acme_json_status];
+  if (reply_status && reply_status[0] == '4') {
+    const char *reply_type = root[acme_json_type];
+    const char *reply_detail = root[acme_json_detail];
+
+    ESP_LOGE(acme_tag, "%s: failure %s %s %s", __FUNCTION__, reply_status, reply_type, reply_detail);
+
+    free(reply);
+    return;
+  } else if (reply_status == 0) {
+    // ESP_LOGE(acme_tag, "%s: null reply_status", __FUNCTION__);
+    ESP_LOGE(acme_tag, "%s: null reply_status (reply %s)", __FUNCTION__, reply);
+  } else {
+    ESP_LOGE(acme_tag, "%s: reply_status %s", __FUNCTION__, reply_status);
+  }
+
+  ReadOrder(root);
+
+  free(reply);
+  return;
+}
+
 void Acme::RequestNewOrder(const char *url) {
   ClearOrderContent();
   ClearChallenge();
@@ -2204,9 +2417,13 @@ char *Acme::MakeProtectedKID(const char *query) {
   if (account->location == 0 || nonce == 0)
     return 0;
 
+  char *my_nonce = GetNonce();
+  if (my_nonce == 0)
+    return 0;
+
   const char *acme_protected_template = "{\"alg\": \"RS256\", \"nonce\": \"%s\", \"url\": \"%s\", \"kid\": \"%s\"}";
-  char *request = (char *)malloc(strlen(acme_protected_template) + strlen(query) + strlen(nonce) + strlen(account->location) + 4);
-  sprintf(request, acme_protected_template, nonce, query, account->location);
+  char *request = (char *)malloc(strlen(acme_protected_template) + strlen(query) + strlen(my_nonce) + strlen(account->location) + 4);
+  sprintf(request, acme_protected_template, my_nonce, query, account->location);
 
   return request;
 }
@@ -2706,6 +2923,18 @@ mbedtls_x509_crt *Acme::getCertificate() {
 
 void Acme::setUrl(const char *fn) {
   acme_url = fn;
+}
+
+void Acme::setAltUrl(const int ix, const char *fn) {
+  if (alt_urls == 0) {
+    alt_urls = (const char **)calloc(sizeof(char *), 4);
+    alt_url_cnt = 4;
+  }
+  if (alt_url_cnt < ix) {
+    alt_url_cnt = ix + 4;
+    alt_urls = (const char **)realloc(alt_urls, alt_url_cnt * sizeof(char *));
+  }
+  alt_urls[ix] = fn;
 }
 
 void Acme::setEmail(const char *fn) {
