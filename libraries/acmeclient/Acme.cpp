@@ -90,6 +90,7 @@ Acme::Acme() {
   filename_prefix = "";
 
   connected = false;
+  stepByStep = false;
 
   ctr_drbg = (mbedtls_ctr_drbg_context *)calloc(1, sizeof(mbedtls_ctr_drbg_context));
   mbedtls_ctr_drbg_init(ctr_drbg);
@@ -299,9 +300,14 @@ void Acme::ProcessStep(int s) {
   step = s;
 }
 
-bool Acme::_ProcessCheck(int s) {
-  if (stepByStep && (step == s)) {
-    ESP_LOGE(acme_tag, "%s step %d achieved, returning", __FUNCTION__, step);
+bool Acme::_ProcessCheck(int s, const char *label) {
+  // Don't delay unless stepByStep is set
+  if (! stepByStep) {
+    ESP_LOGI(acme_tag, "%s step %d (%s) achieved, continuing", __FUNCTION__, step, label);
+    return false;
+  }
+  if (step == s) {
+    ESP_LOGE(acme_tag, "%s step %d (%s) achieved, returning", __FUNCTION__, step, label);
     return true;
   }
   return false;
@@ -326,9 +332,9 @@ bool Acme::_ProcessDelay(time_t now) {
  * We need these macros to be able to return from the AcmeProcess function.
  * So _ProcessCheck will return true to make ProcessCheck cause a return in AcmeProcess.
  */
-#define	ProcessCheck(s)			\
+#define	ProcessCheck(s, l)		\
   {					\
-    if (_ProcessCheck(s)) {		\
+    if (_ProcessCheck(s, l)) {		\
       stepTime = now;			\
       return;				\
     }					\
@@ -385,7 +391,7 @@ void Acme::AcmeProcess(time_t now) {
       return;
     }
   }
-  ProcessCheck(ACME_STEP_ACCOUNT);
+  ProcessCheck(ACME_STEP_ACCOUNT, "Account");
 
   if (order == 0) {	// We haven't read storage yet, and we've not been kickstarted by the application.
     ESP_LOGD(acme_tag, "%s Read order info", __FUNCTION__);
@@ -410,7 +416,7 @@ void Acme::AcmeProcess(time_t now) {
     ESP_LOGD(acme_tag, "%s order status 0", __FUNCTION__);
     return;
   }
-  ProcessCheck(ACME_STEP_ORDER);
+  ProcessCheck(ACME_STEP_ORDER, "Order");
 
   // Check deeper
   boolean invalid = false;
@@ -427,16 +433,12 @@ void Acme::AcmeProcess(time_t now) {
 	break;
       }
   }
-  ProcessCheck(ACME_STEP_CHALLENGE);
-
   if (invalid) {
-    ProcessStep(ACME_STEP_ORDER2);
-    // RequestNewOrder(acme_url);
     RequestNewOrder(acme_url, alt_urls);
     WriteOrderInfo();
     return;
   }
-  ProcessCheck(ACME_STEP_ORDER2);
+  ProcessCheck(ACME_STEP_CHALLENGE, "Challenge");
 
   if (strcmp(order->status, acme_status_pending) == 0) {
     ProcessStep(ACME_STEP_VALIDATE);
@@ -444,14 +446,14 @@ void Acme::AcmeProcess(time_t now) {
     ESP_LOGI(acme_tag, "%s: ValidateOrder -> %s", __FUNCTION__, ok ? "ok" : "fail");
     WriteOrderInfo();
   }
-  ProcessCheck(ACME_STEP_VALIDATE);
+  ProcessCheck(ACME_STEP_VALIDATE, "Validate");
 
   if (strcmp(order->status, acme_status_ready) == 0) {
     ProcessStep(ACME_STEP_FINALIZE);
     FinalizeOrder();
     WriteOrderInfo();
   }
-  ProcessCheck(ACME_STEP_FINALIZE);
+  ProcessCheck(ACME_STEP_FINALIZE, "Finalize");
 
   if (strcmp(order->status, acme_status_processing) == 0) {
     ;
@@ -478,7 +480,7 @@ void Acme::AcmeProcess(time_t now) {
     order->status = strdup(acme_status_downloaded);		// an additional status
     WriteOrderInfo();
   }
-  ProcessCheck(ACME_STEP_DOWNLOAD);
+  ProcessCheck(ACME_STEP_DOWNLOAD, "Download");
 
   if (strcmp(order->status, acme_status_invalid) == 0) {
     // Something went wrong with this order, need to restart a new order
@@ -983,7 +985,7 @@ void Acme::setNonce(char *s) {
   nonce = strdup(s);
   nonce_use = 0;
 
-  ESP_LOGE(acme_tag, "%s(%s)", __FUNCTION__, nonce);
+  ESP_LOGI(acme_tag, "%s(%s)", __FUNCTION__, nonce);
 }
 
 // This is needed because the location field is passed back in an HTTP header
@@ -1432,9 +1434,8 @@ boolean Acme::ReadAccountInfo() {
   long len = fseek(f, 0L, SEEK_END);
   if (len == 0) {
     len = NREAD_INC;
-    ESP_LOGI(acme_tag, "Reading Account info from %s (in chunks of %d)", fn, NREAD_INC);
-  } else
-    ESP_LOGI(acme_tag, "Reading Account info from %s (%ld bytes)", fn, len);
+  }
+  ESP_LOGI(acme_tag, "Reading Account info from %s (per %ld)", fn, len);
   free(fn);
 
   fseek(f, 0L, SEEK_SET);
@@ -1451,7 +1452,7 @@ boolean Acme::ReadAccountInfo() {
     ESP_LOGD(acme_tag, "Reading -> %d bytes, total %d ", inc, total);
   }
   fclose(f);
-  ESP_LOGI(acme_tag, "%s: %s", __FUNCTION__, buffer);
+  ESP_LOGD(acme_tag, "%s: %s", __FUNCTION__, buffer);
 
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(buffer);
@@ -1926,8 +1927,6 @@ boolean Acme::ValidateOrder() {
     sprintf(remotefn, "%s%s%s", ftp_path, well_known, token);
 
     StoreFileOnWebserver(localfn, remotefn);
-#else
-#   warning "Not configured for external webserver"
 #endif
   } else {
     /*
@@ -2169,7 +2168,7 @@ void Acme::DownloadAuthorizationResource() {
 
   free(msg);
   if (reply) {
-    ESP_LOGI(acme_tag, "PerformWebQuery -> %s", reply);
+    ESP_LOGD(acme_tag, "PerformWebQuery -> %s", reply);
   } else {
     ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
   }
@@ -2447,6 +2446,7 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
   memset(&httpc, 0, sizeof(httpc));
   httpc.url = query;
   httpc.event_handler = HttpEvent;
+  // httpc.buffer_size = 1024;		// HACK to ensure the nonce header doesn't get cut in two
   client = esp_http_client_init(&httpc);
 
   if (reply_buffer)
@@ -2603,7 +2603,7 @@ void Acme::StoreFileOnWebserver(char *localfn, char *remotefn) {
   NetBuf_t	*nb = 0;
 
   if (! (ftp_user && ftp_path && ftp_server && ftp_pass)) {
-    ESP_LOGI(acme_tag, "%s: failed, incomplete setup", __FUNCTION__);
+    ESP_LOGE(acme_tag, "%s: failed, incomplete setup", __FUNCTION__);
     return;
   }
   ESP_LOGI(acme_tag, "%s(%s,%s)", __FUNCTION__, localfn, remotefn);
@@ -2629,7 +2629,7 @@ void Acme::RemoveFileFromWebserver(char *remotefn) {
   NetBuf_t	*nb = 0;
 
   if (! (ftp_user && ftp_path && ftp_server && ftp_pass)) {
-    ESP_LOGI(acme_tag, "%s: failed, incomplete setup", __FUNCTION__);
+    ESP_LOGE(acme_tag, "%s: failed, incomplete setup", __FUNCTION__);
     return;
   }
   ESP_LOGI(acme_tag, "%s(%s)", __FUNCTION__, remotefn);
@@ -2656,11 +2656,11 @@ void Acme::OrderRemove(char *dir) {
   if (order_fn == 0)
     return;
 
-  ESP_LOGI(acme_tag, "%s(%s,%s)", __FUNCTION__, dir, order_fn);
+  ESP_LOGD(acme_tag, "%s(%s,%s)", __FUNCTION__, dir, order_fn);
 
   int err = unlink(dir);
   if (err == ESP_OK)
-    ESP_LOGI(acme_tag, "Removed %s", order_fn);
+    ESP_LOGD(acme_tag, "Removed %s", order_fn);
   else
     ESP_LOGE(acme_tag, "Failed to remove %s", order_fn);
 }

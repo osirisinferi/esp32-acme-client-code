@@ -11,3 +11,5 @@ This library allows you to get certificates for IoT devices based on the ESP32.
 More info in <a href="https://sourceforge.net/p/esp32-acme-client/code/HEAD/tree/trunk/libraries/acmeclient/Readme.md">libraries/acmeclient/Readme.md</a> .
 
 Specific configuration examples and technology overview is in <a href="https://sourceforge.net/p/esp32-acme-client/code/HEAD/tree/trunk/libraries/acmeclient/Configurations.md">Configurations.md</a>.
+
+Important note : the esp-idf esp_http_client_fetch_headers has a bug which causes the nonce in ACME communication to get cut off. Fix by either setting buffer size to e.g. 800 or actually fixing the code. A fixed version is in the components directory.

@@ -369,6 +369,7 @@ class Acme {
 
     void ProcessStep(int);
     bool _ProcessCheck(int);
+    bool _ProcessCheck(int, const char *);
     bool _ProcessDelay(time_t);
 
     const int ACME_STEP_NONE		= 0;
