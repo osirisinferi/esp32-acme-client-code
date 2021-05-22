@@ -300,6 +300,7 @@ void Acme::ProcessStep(int s) {
   step = s;
 }
 
+#if 0
 bool Acme::_ProcessCheck(int s, const char *label) {
   // Don't delay unless stepByStep is set
   if (! stepByStep) {
@@ -332,9 +333,9 @@ bool Acme::_ProcessDelay(time_t now) {
  * We need these macros to be able to return from the AcmeProcess function.
  * So _ProcessCheck will return true to make ProcessCheck cause a return in AcmeProcess.
  */
-#define	ProcessCheck(s, l)		\
+#define	ProcessCheck(_s, l)		\
   {					\
-    if (_ProcessCheck(s, l)) {		\
+    if (_ProcessCheck(_s, l)) {		\
       stepTime = now;			\
       return;				\
     }					\
@@ -345,6 +346,12 @@ bool Acme::_ProcessDelay(time_t now) {
     if (stepTime && _ProcessDelay(n))	\
       return;				\
   }
+#else
+#define	ProcessCheck(s, l)		\
+	ESP_LOGI(acme_tag, "%s step %d (%s) achieved", __FUNCTION__, s, l)
+#define ProcessDelay(n)			\
+	{ }
+#endif
 
 /*
  * This runs the engine to reacquire a certificate.
@@ -1890,6 +1897,7 @@ boolean Acme::ValidateOrder() {
     if (strcmp(challenge->challenges[i]._type, acme_http_01) == 0) {
       token = challenge->challenges[i].token;
       http01_ix = i;
+      ESP_LOGI(acme_tag, "%s: HTTP challenge in %d, token %s", __FUNCTION__, i, token);
     }
   }
   if (token == 0) {
@@ -2159,48 +2167,52 @@ void Acme::DownloadAuthorizationResource() {
     return;
   }
 
-  char *msg = MakeMessageKID(order->authorizations[0], "");
+  for (int i=0; order->authorizations[i]; i++) {
+    ESP_LOGI(acme_tag, "%s: %d %s", __FUNCTION__, i, order->authorizations[i]);
 
-  ESP_LOGD(acme_tag, "%s: query %s message %s", __FUNCTION__, order->authorizations[0], msg);
+    char *msg = MakeMessageKID(order->authorizations[i], "");
 
-  // FIXME only one authorization is picked up
-  char *reply = PerformWebQuery(order->authorizations[0], msg, acme_jose_json, 0);
+    ESP_LOGD(acme_tag, "%s: query %s message %s", __FUNCTION__, order->authorizations[i], msg);
 
-  free(msg);
-  if (reply) {
-    ESP_LOGD(acme_tag, "PerformWebQuery -> %s", reply);
-  } else {
-    ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
-  }
+    // FIXME only one authorization is picked up
+    char *reply = PerformWebQuery(order->authorizations[i], msg, acme_jose_json, 0);
 
-  // Decode JSON reply
-  DynamicJsonBuffer jb;
-  JsonObject &root = jb.parseObject(reply);
-  if (! root.success()) {
-    ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
+    free(msg);
+    if (reply) {
+      ESP_LOGD(acme_tag, "PerformWebQuery -> %s", reply);
+    } else {
+      ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
+    }
+
+    // Decode JSON reply
+    DynamicJsonBuffer jb;
+    JsonObject &root = jb.parseObject(reply);
+    if (! root.success()) {
+      ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
+      free(reply);
+      return;
+    }
+    ESP_LOGD(acme_tag, "%s : JSON opened", __FUNCTION__);
+
+    const char *reply_status = root[acme_json_status];
+    if (reply_status && reply_status[0] == '4') {
+      const char *reply_type = root[acme_json_type];
+      const char *reply_detail = root[acme_json_detail];
+
+      ESP_LOGE(acme_tag, "%s: failure %s %s %s", __FUNCTION__, reply_status, reply_type, reply_detail);
+
+      free(reply);
+      return;
+    } else if (reply_status == 0) {
+      // ESP_LOGE(acme_tag, "%s: null reply_status", __FUNCTION__);
+      ESP_LOGE(acme_tag, "%s: null reply_status (reply %s)", __FUNCTION__, reply);
+    } else {
+      ESP_LOGD(acme_tag, "%s: reply_status %s", __FUNCTION__, reply_status);
+    }
+
+    ReadChallenge(root);
     free(reply);
-    return;
   }
-  ESP_LOGD(acme_tag, "%s : JSON opened", __FUNCTION__);
-
-  const char *reply_status = root[acme_json_status];
-  if (reply_status && reply_status[0] == '4') {
-    const char *reply_type = root[acme_json_type];
-    const char *reply_detail = root[acme_json_detail];
-
-    ESP_LOGE(acme_tag, "%s: failure %s %s %s", __FUNCTION__, reply_status, reply_type, reply_detail);
-
-    free(reply);
-    return;
-  } else if (reply_status == 0) {
-    // ESP_LOGE(acme_tag, "%s: null reply_status", __FUNCTION__);
-    ESP_LOGE(acme_tag, "%s: null reply_status (reply %s)", __FUNCTION__, reply);
-  } else {
-    ESP_LOGD(acme_tag, "%s: reply_status %s", __FUNCTION__, reply_status);
-  }
-
-  ReadChallenge(root);
-  free(reply);
 }
 
 /*
