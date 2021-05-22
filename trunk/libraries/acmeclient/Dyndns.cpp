@@ -2,7 +2,7 @@
  * Send periodic updates to a DynDNS provider.
  * Currently supported : noip.com , cloudns.net .
  *
- * Copyright (c) 2016, 2017, 2020 Danny Backx
+ * Copyright (c) 2016, 2017, 2020, 2021 Danny Backx
  *
  * License (MIT license):
  *   Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -67,6 +67,11 @@
 
 Dyndns *__dyndns;
 
+// Global variables (shared among Dyndns client instances)
+int __dyndns_count = 0;
+char *__dyndns_buf = NULL;
+// end global variables
+
 Dyndns::Dyndns() {
   memset(&http_config, 0, sizeof(http_config));
   http_config.event_handler = _http_event_handler;
@@ -75,6 +80,7 @@ Dyndns::Dyndns() {
   provider = DD_UNKNOWN;
 
   __dyndns = this;
+  __dyndns_count++;
 }
 
 Dyndns::Dyndns(dyndns_provider p) {
@@ -85,6 +91,7 @@ Dyndns::Dyndns(dyndns_provider p) {
   provider = p;
 
   __dyndns = this;
+  __dyndns_count++;
 }
 
 Dyndns::Dyndns(const char *p) {
@@ -94,6 +101,7 @@ Dyndns::Dyndns(const char *p) {
   hostname = ip = auth = buf = 0;
 
   __dyndns = this;
+  __dyndns_count++;
 
   if (strcasecmp(p, "cloudns.net") == 0 || strcasecmp(p, "cloudns") == 0)
     provider = DD_CLOUDNS;
@@ -105,6 +113,12 @@ Dyndns::Dyndns(const char *p) {
 }
 
 Dyndns::~Dyndns() {
+  __dyndns_count--;
+  if (__dyndns_count == 0) {
+    free(__dyndns_buf);
+    __dyndns_buf = NULL;
+  }
+
 }
 
 void Dyndns::setHostname(const char *hostname) {
@@ -175,7 +189,10 @@ boolean Dyndns::update() {
   if (provider == DD_NOIP)
     esp_http_client_set_header(http_client, hdr_header, header);
 
-  buf = (char *)malloc(80);
+  if (__dyndns_buf)
+    buf = __dyndns_buf;
+  else
+    __dyndns_buf = buf = (char *)malloc(80);
 
   // GET
   esp_err_t err = esp_http_client_perform(http_client);
@@ -199,7 +216,7 @@ boolean Dyndns::update() {
   if (header)
     free(header);
   if (buf) {
-    free(buf);
+    // free(buf);
     buf = 0;
   }
   esp_http_client_cleanup(http_client);
@@ -236,9 +253,9 @@ esp_err_t Dyndns::_http_event_handler(esp_http_client_event_t *evt)
             ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
             break;
         case HTTP_EVENT_ON_DATA:
-	    strncpy(__dyndns->buf, (const char *)evt->data, evt->data_len);
-	    __dyndns->buf[evt->data_len] = 0;
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_DATA, len=%d, {%s}", evt->data_len, __dyndns->buf);
+	    strncpy(__dyndns_buf, (const char *)evt->data, evt->data_len);
+	    __dyndns_buf[evt->data_len] = 0;
+            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_DATA, len=%d, {%s}", evt->data_len, __dyndns_buf);
 
             break;
         case HTTP_EVENT_ON_FINISH:
