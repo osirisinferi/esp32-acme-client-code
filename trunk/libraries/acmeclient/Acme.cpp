@@ -2689,13 +2689,13 @@ void Acme::CertificateDownload() {
  * See https://github.com/ARMmbed/mbedtls/issues/1878
  */
 int Acme::CreateAltUrlList(mbedtls_x509write_csr req) {
-  int l = 0;
+  int l = 20;
   int ret;
 
   for (int i=0; alt_urls[i]; i++) {
     l += strlen(alt_urls[i]) + 20;
   }
-  unsigned char *p = (unsigned char *)malloc(l), *buf = p;
+  unsigned char *buf = (unsigned char *)malloc(l), *p = buf + l;
 
   int len = 0;
   for (int i=0; alt_urls[i]; i++) {
@@ -2710,12 +2710,13 @@ int Acme::CreateAltUrlList(mbedtls_x509write_csr req) {
   if ((ret = mbedtls_x509write_csr_set_extension(&req,
         MBEDTLS_OID_SUBJECT_ALT_NAME, MBEDTLS_OID_SIZE(MBEDTLS_OID_SUBJECT_ALT_NAME),
 	(const unsigned char *)p, len)) != 0) {
-    char buf[80];
-    mbedtls_strerror(ret, buf, sizeof(buf));
-    ESP_LOGE(acme_tag, "%s: mbedtls_x509write_csr_set_extension failed %s (0x%04x)", __FUNCTION__, buf, -ret);
+    char errbuf[80];
+    mbedtls_strerror(ret, errbuf, sizeof(errbuf));
+    ESP_LOGE(acme_tag, "%s: mbedtls_x509write_csr_set_extension failed %s (0x%04x)", __FUNCTION__, errbuf, -ret);
   }
 
   free(buf);
+  ESP_LOGD(acme_tag, "%s: ret %d", __FUNCTION__, ret);
   return ret;
 }
 
@@ -2754,8 +2755,12 @@ char *Acme::GenerateCSR() {
 
   if (alt_urls) {
     ret = CreateAltUrlList(req);
-    if (ret < 0)
-      ESP_LOGE(acme_tag, "CreateAltUrlList failed");
+    if (ret != 0) {
+      char buf[80];
+      mbedtls_strerror(ret, buf, sizeof(buf));
+      ESP_LOGE(acme_tag, "%s: CreateAltUrlList failed %s (0x%04x)", __FUNCTION__, buf, -ret);
+    }
+  
   }
 
   unsigned char *buffer = (unsigned char *)malloc(buflen);
