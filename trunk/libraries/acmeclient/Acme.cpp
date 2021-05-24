@@ -43,6 +43,8 @@
 #include <lwip/etharp.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/sha1.h>
+#include <mbedtls/oid.h>
+#include <mbedtls/asn1write.h>
 #include <mbedtls/x509_csr.h>
 #include <esp_http_client.h>
 
@@ -2682,6 +2684,42 @@ void Acme::CertificateDownload() {
 }
 
 /*
+ * Create an ASN1 representation of the list of alternative URLs.
+ *
+ * See https://github.com/ARMmbed/mbedtls/issues/1878
+ */
+int Acme::CreateAltUrlList(mbedtls_x509write_csr req) {
+  int l = 0;
+  int ret;
+
+  for (int i=0; alt_urls[i]; i++) {
+    l += strlen(alt_urls[i]) + 20;
+  }
+  unsigned char *p = (unsigned char *)malloc(l), *buf = p;
+
+  int len = 0;
+  for (int i=0; alt_urls[i]; i++) {
+    MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_raw_buffer(&p, buf, (const unsigned char *)alt_urls[i], strlen(alt_urls[i])));
+    MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_len(&p, buf, strlen(alt_urls[i])));
+    MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_tag(&p, buf, MBEDTLS_ASN1_CONTEXT_SPECIFIC | 2));
+  }
+
+  MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_len(&p, buf, len));
+  MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_tag(&p, buf, MBEDTLS_ASN1_CONSTRUCTED | MBEDTLS_ASN1_SEQUENCE));
+
+  if ((ret = mbedtls_x509write_csr_set_extension(&req,
+        MBEDTLS_OID_SUBJECT_ALT_NAME, MBEDTLS_OID_SIZE(MBEDTLS_OID_SUBJECT_ALT_NAME),
+	(const unsigned char *)p, len)) != 0) {
+    char buf[80];
+    mbedtls_strerror(ret, buf, sizeof(buf));
+    ESP_LOGE(acme_tag, "%s: mbedtls_x509write_csr_set_extension failed %s (0x%04x)", __FUNCTION__, buf, -ret);
+  }
+
+  free(buf);
+  return ret;
+}
+
+/*
  * A Certificate Signing Request (CSR) is a required parameter to the Finalize query.
  * It can be used to add administrative data to the process, and is validated thoroughly.
  * One such additional parameter is the domain private key.
@@ -2689,6 +2727,8 @@ void Acme::CertificateDownload() {
 char *Acme::GenerateCSR() {
   const int buflen = 4096;	// This is used in mbedtls_x509 functions internally
   int ret;
+
+  ESP_LOGI(acme_tag, "%s()", __FUNCTION__);
 
   mbedtls_x509write_csr	req;
   memset(&req, 0, sizeof(req));
@@ -2710,6 +2750,12 @@ char *Acme::GenerateCSR() {
     mbedtls_x509write_csr_free(&req);
     free(sn);
     return 0;
+  }
+
+  if (alt_urls) {
+    ret = CreateAltUrlList(req);
+    if (ret < 0)
+      ESP_LOGE(acme_tag, "CreateAltUrlList failed");
   }
 
   unsigned char *buffer = (unsigned char *)malloc(buflen);
@@ -2942,11 +2988,12 @@ void Acme::setAltUrl(const int ix, const char *fn) {
     alt_urls = (const char **)calloc(sizeof(char *), 4);
     alt_url_cnt = 4;
   }
-  if (alt_url_cnt < ix) {
+  if (alt_url_cnt < ix + 1) {
     alt_url_cnt = ix + 4;
     alt_urls = (const char **)realloc(alt_urls, alt_url_cnt * sizeof(char *));
   }
   alt_urls[ix] = fn;
+  alt_urls[ix+1] = NULL;
 }
 
 void Acme::setEmail(const char *fn) {
