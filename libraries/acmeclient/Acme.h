@@ -47,6 +47,7 @@
 #include "mbedtls/error.h"
 #include "mbedtls/rsa.h"
 #include "mbedtls/sha256.h"
+#include <mbedtls/x509_csr.h>
 
 class Acme {
   public:
@@ -262,6 +263,7 @@ class Acme {
     void	DownloadCertificate();
     void	ReadFinalizeReply(JsonObject &json);
     char	*GenerateCSR();
+    int		CreateAltUrlList(mbedtls_x509write_csr req);
 
     void	SetAcmeUserAgentHeader(esp_http_client_handle_t);
 
