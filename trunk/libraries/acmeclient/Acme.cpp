@@ -303,6 +303,9 @@ void Acme::ProcessStep(int s) {
 }
 
 #if 0
+/*
+ * Not sure if this works very well
+ */
 bool Acme::_ProcessCheck(int s, const char *label) {
   // Don't delay unless stepByStep is set
   if (! stepByStep) {
@@ -350,7 +353,7 @@ bool Acme::_ProcessDelay(time_t now) {
   }
 #else
 #define	ProcessCheck(s, l)		\
-	ESP_LOGI(acme_tag, "%s step %d (%s) achieved", __FUNCTION__, s, l)
+	ESP_LOGD(acme_tag, "%s step %d (%s) achieved", __FUNCTION__, s, l)
 #define ProcessDelay(n)			\
 	{ }
 #endif
@@ -2760,7 +2763,6 @@ char *Acme::GenerateCSR() {
       mbedtls_strerror(ret, buf, sizeof(buf));
       ESP_LOGE(acme_tag, "%s: CreateAltUrlList failed %s (0x%04x)", __FUNCTION__, buf, -ret);
     }
-  
   }
 
   unsigned char *buffer = (unsigned char *)malloc(buflen);
