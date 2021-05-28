@@ -255,7 +255,8 @@ esp_err_t Dyndns::_http_event_handler(esp_http_client_event_t *evt)
         case HTTP_EVENT_ON_DATA:
 	    strncpy(__dyndns_buf, (const char *)evt->data, evt->data_len);
 	    __dyndns_buf[evt->data_len] = 0;
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_DATA, len=%d, {%s}", evt->data_len, __dyndns_buf);
+            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_DATA, len=%d, {%.*s}", evt->data_len,
+	      evt->data_len, __dyndns_buf);
 
             break;
         case HTTP_EVENT_ON_FINISH:
