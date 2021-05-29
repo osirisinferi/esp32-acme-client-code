@@ -848,7 +848,7 @@ void Acme::QueryAcmeDirectory() {
     return;
   }
 
-  ESP_LOGI(acme_tag, "Querying directory at %s", acme_server_url);
+  ESP_LOGD(acme_tag, "Querying directory at %s", acme_server_url);
   ClearDirectory();
 
   char *reply = PerformWebQuery(acme_server_url, 0, 0, 0);
@@ -891,7 +891,7 @@ void Acme::QueryAcmeDirectory() {
     ESP_LOGE(acme_tag, "%s: incomplete results : newAccount %p newNonce %p newOrder %p", __FUNCTION__,
       directory->newAccount, directory->newNonce, directory->newOrder);
   else
-    ESP_LOGI(acme_tag, "%s: ok", __FUNCTION__);
+    ESP_LOGD(acme_tag, "%s: ok", __FUNCTION__);
 }
 
 /*
@@ -1055,7 +1055,7 @@ mbedtls_pk_context *Acme::ReadPrivateKey(const char *ifn) {
     return 0;
   }
 
-  ESP_LOGI(acme_tag, "%s: read key file (%s) ok", __FUNCTION__, fn);
+  ESP_LOGD(acme_tag, "%s: read key file (%s) ok", __FUNCTION__, fn);
   free(fn);
   return pk;
 }
@@ -1267,7 +1267,7 @@ boolean Acme::RequestNewAccount(const char *contact, boolean onlyExisting) {
     // ESP_LOGE(acme_tag, "%s: null reply_status", __FUNCTION__);
     ESP_LOGE(acme_tag, "%s: null reply_status (reply %s)", __FUNCTION__, reply);
   } else {
-    ESP_LOGI(acme_tag, "%s: reply_status '%s'", __FUNCTION__, reply_status);
+    ESP_LOGD(acme_tag, "%s: reply_status '%s'", __FUNCTION__, reply_status);
   }
 
   ReadAccount(root);
@@ -2902,7 +2902,7 @@ void Acme::ReadCertificate() {
       certificate->valid_from.hour, certificate->valid_from.min, certificate->valid_from.sec,
       certificate->valid_to.year, certificate->valid_to.mon, certificate->valid_to.day,
       certificate->valid_to.hour, certificate->valid_to.min, certificate->valid_to.sec);
-#if 1
+#if 0
     time_t vt = TimeMbedToTimestamp(certificate->valid_to);
     struct tm *tmp = gmtime(&vt);
 

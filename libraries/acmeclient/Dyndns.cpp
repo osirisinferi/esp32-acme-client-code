@@ -126,12 +126,24 @@ void Dyndns::setHostname(const char *hostname) {
   this->hostname = (char *)hostname;
 }
 
+const char *Dyndns::getHostname() {
+  return hostname;
+}
+
 void Dyndns::setAddress(const char *ip) {
   this->ip = (char *)ip;
 }
 
+const char *Dyndns::getAddress() {
+  return ip;
+}
+
 void Dyndns::setAuth(const char *auth) {
   this->auth = (char *)auth;
+}
+
+const char *Dyndns::getAuth() {
+  return auth;
 }
 
 /*

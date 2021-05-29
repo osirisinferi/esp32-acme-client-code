@@ -41,8 +41,13 @@ public:
   ~Dyndns();
   boolean update();
   void setHostname(const char *);
+  const char *getHostname();
+
   void setAddress(const char *);
+  const char *getAddress();
+
   void setAuth(const char *);
+  const char *getAuth();
 
 private:
   esp_http_client_handle_t	http_client;
