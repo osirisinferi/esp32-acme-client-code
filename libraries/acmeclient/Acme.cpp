@@ -930,8 +930,9 @@ boolean Acme::RequestNewNonce() {
 
     free(nonce);
     nonce = 0;
-  } else
-    ESP_LOGE(acme_tag, "%s", __FUNCTION__);
+  } else {
+    ESP_LOGD(acme_tag, "%s", __FUNCTION__);
+  }
 
   if (directory->newNonce == 0) {
     ESP_LOGE(acme_tag, "%s: we have no newNonce URL", __FUNCTION__);
@@ -997,7 +998,7 @@ void Acme::setNonce(char *s) {
   nonce = strdup(s);
   nonce_use = 0;
 
-  ESP_LOGI(acme_tag, "%s(%s)", __FUNCTION__, nonce);
+  ESP_LOGD(acme_tag, "%s(%s)", __FUNCTION__, nonce);
 }
 
 // This is needed because the location field is passed back in an HTTP header
