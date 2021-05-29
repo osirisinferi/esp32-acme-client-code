@@ -1,6 +1,7 @@
 /*
  * Send periodic updates to a DynDNS provider.
  * Currently supported : noip.com , cloudns.net .
+ * Although a global variable is in play, more than one hostname is supported.
  *
  * Copyright (c) 2016, 2017, 2020, 2021 Danny Backx
  *
