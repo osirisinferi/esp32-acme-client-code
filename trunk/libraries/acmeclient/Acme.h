@@ -31,7 +31,7 @@
 #include <ArduinoJson.h>
 
 #include <sys/socket.h>
-#include <esp_event_loop.h>
+#include <esp_event.h>
 #include <esp_http_client.h>
 #if USE_EXTERNAL_WEBSERVER
 #include <FtpClient.h>
@@ -74,7 +74,7 @@ class Acme {
     void setFtpPath(const char *);
     void setWebServer(httpd_handle_t);
 
-    void loop(time_t now);
+    bool loop(time_t now);			// Return true on a certificate change
     bool HaveValidCertificate(time_t);
     bool HaveValidCertificate();
 
@@ -87,7 +87,11 @@ class Acme {
     void setCertificateKey(mbedtls_pk_context *ck);
 
     bool CreateNewAccount();
-    void AcmeProcess(time_t);			// Run the ACME client FSM (finite state machine)
+    /*
+     * Run the ACME client FSM (finite state machine)
+     * Returns true on a certificate change.
+     */
+    bool AcmeProcess(time_t);
     mbedtls_x509_crt *getCertificate();
 
     void CreateNewOrder();
@@ -126,6 +130,8 @@ class Acme {
     const char *acme_jose_json = "application/jose+json";
     const char *acme_accept_header = "Accept";
     const char *acme_accept_pem_chain = "application/pem-certificate-chain";
+    // const char *acme_accept_der = "application/pkix-cert";
+    // const char *acme_accept_der = "application/pkcs7-mime";
     const char *well_known = "/.well-known/acme-challenge/";
     const char *acme_http_01 = "http-01";
 
