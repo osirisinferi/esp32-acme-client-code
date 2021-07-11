@@ -23,9 +23,9 @@
 #ifndef _INCLUDE_DYNDNS_H_
 #define _INCLUDE_DYNDNS_H_
 
-#include <Arduino.h>
+// #include <Arduino.h>
 #include <esp_http_client.h>
-#include <esp_event_loop.h>
+#include <esp_event.h>
 
 enum dyndns_provider {
  DD_UNKNOWN,
@@ -39,7 +39,7 @@ public:
   Dyndns(dyndns_provider);
   Dyndns(const char *);
   ~Dyndns();
-  boolean update();
+  bool update();
   void setHostname(const char *);
   const char *getHostname();
 

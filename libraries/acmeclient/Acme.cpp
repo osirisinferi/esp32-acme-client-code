@@ -33,7 +33,6 @@
  *   THE SOFTWARE.
  */
 
-#include <Arduino.h>
 #include "secrets.h"
 #include "esp_log.h"
 
@@ -264,21 +263,23 @@ void Acme::NetworkDisconnected(void *ctx, system_event_t *event) {
  *  - trigger the ACME request engine (finite state machine) to advance order status
  *  - check if the current certificate should be renewed, and cause that (which stumbles into the above)
  *    The last_run member ensures we either do this at reboot, or only once per hour.
+ *
+ * Returns true if there was a change to the certificate.
  */
-void Acme::loop(time_t now) {
+bool Acme::loop(time_t now) {
   if (order) {
     AcmeProcess(now);
-    return;		// FIXME ? Only look into renewal if we're not processing here.
+    return false;	// FIXME ? Only look into renewal if we're not processing here.
   }
 
   // Only do stuff on first call or wait an hour
   if ((last_run != 0) && (now - last_run < 3600))
-      return;
+      return false;
   last_run = now;
 
   // If we have a certificate, are we inside the renewal time range
   if (certificate == 0)
-    return;
+    return false;
   time_t until = TimeMbedToTimestamp(certificate->valid_to);
   time_t month = 60 * 60 * 24 * 31;
 
@@ -287,6 +288,7 @@ void Acme::loop(time_t now) {
     ESP_LOGI(acme_tag, "Renewing certificate from %s", __FUNCTION__);
     RenewCertificate();
   }
+  return false;
 }
 
 /*
@@ -370,7 +372,7 @@ bool Acme::_ProcessDelay(time_t now) {
  */
 static int process_count = 5;
 
-void Acme::AcmeProcess(time_t now) {
+bool Acme::AcmeProcess(time_t now) {
   ProcessStep(ACME_STEP_NONE);
   ProcessDelay(now);
 
@@ -379,11 +381,11 @@ void Acme::AcmeProcess(time_t now) {
    * If directory == 0 we only print limited number of error messages.
    */
   if (process_count-- < 0) {
-    return;
+    return false;
   }
   if (directory == 0) {
     ESP_LOGE(acme_tag, "%s: no directory", __FUNCTION__);
-    return;
+    return false;
   }
 
   ESP_LOGD(acme_tag, "%s", __FUNCTION__);
@@ -400,7 +402,7 @@ void Acme::AcmeProcess(time_t now) {
     }
     if (account == 0) {
       ESP_LOGE(acme_tag, "%s: fail, no account", __FUNCTION__);
-      return;
+      return false;
     }
   }
   ProcessCheck(ACME_STEP_ACCOUNT, "Account");
@@ -410,7 +412,7 @@ void Acme::AcmeProcess(time_t now) {
     ReadOrderInfo();
   }
   if (order == 0)
-    return;		// Return silently
+    return false;		// Return silently
 
   if (order->status == 0) {
     ProcessStep(ACME_STEP_ORDER);
@@ -421,17 +423,17 @@ void Acme::AcmeProcess(time_t now) {
       // RequestNewOrder(acme_url);
       RequestNewOrder(acme_url, alt_urls);
       WriteOrderInfo();
-      return;
+      return false;
     }
   }
   if (order->status == 0) {
     ESP_LOGD(acme_tag, "%s order status 0", __FUNCTION__);
-    return;
+    return false;
   }
   ProcessCheck(ACME_STEP_ORDER, "Order");
 
   // Check deeper
-  boolean invalid = false;
+  bool invalid = false;
   if (challenge && strcmp(challenge->status, acme_status_invalid) == 0) {
     ProcessStep(ACME_STEP_CHALLENGE);
     ESP_LOGE(acme_tag, "%s : %s challenge, starting a new order", __FUNCTION__, acme_status_invalid);
@@ -448,13 +450,13 @@ void Acme::AcmeProcess(time_t now) {
   if (invalid) {
     RequestNewOrder(acme_url, alt_urls);
     WriteOrderInfo();
-    return;
+    return false;
   }
   ProcessCheck(ACME_STEP_CHALLENGE, "Challenge");
 
   if (strcmp(order->status, acme_status_pending) == 0) {
     ProcessStep(ACME_STEP_VALIDATE);
-    boolean ok = ValidateOrder();
+    bool ok = ValidateOrder();
     ESP_LOGI(acme_tag, "%s: ValidateOrder -> %s", __FUNCTION__, ok ? "ok" : "fail");
     WriteOrderInfo();
   }
@@ -503,11 +505,13 @@ void Acme::AcmeProcess(time_t now) {
     if (ws_registered)
       DisableLocalWebServer();
 
-    return;
+    return false;
   }
+  
+  return true;
 }
 
-boolean Acme::CreateNewAccount() {
+bool Acme::CreateNewAccount() {
   if (!connected) return false;
   if (directory == 0) {
     QueryAcmeDirectory();
@@ -529,7 +533,7 @@ boolean Acme::CreateNewAccount() {
 
   ESP_LOGI(acme_tag, "%s: creating account %s ...", __FUNCTION__, email_address);
   // Otherwise, try to create one
-  boolean ok = RequestNewAccount(email_address, false);
+  bool ok = RequestNewAccount(email_address, false);
   if (ok) {
     ESP_LOGI(acme_tag, "%s: success : account %s created", __FUNCTION__, email_address);
     WriteAccountInfo();
@@ -915,7 +919,7 @@ void Acme::ClearDirectory() {
  * This requires a 3 function implementation because the esp_http_client API doesn't expose reply headers except in an event handler.
  * The reply data is available though, go figure :-(
  */
-boolean Acme::RequestNewNonce() {
+bool Acme::RequestNewNonce() {
   esp_err_t			err;
   esp_http_client_config_t	httpc;
   esp_http_client_handle_t	client;
@@ -1121,11 +1125,32 @@ void Acme::WritePrivateKey(mbedtls_pk_context *pk, const char *ifn) {
   char buf[80];
   unsigned char keystring[2048];
 
-  if ((ret = mbedtls_pk_write_key_pem(pk, keystring, sizeof(keystring))) != 0) {
-    mbedtls_strerror(ret, buf, sizeof(buf));
-    ESP_LOGE(acme_tag, "%s: mbedtls_pk_write_key_pem failed %s (0x%04x)", __FUNCTION__, buf, -ret);
-    free(fn);
-    return;
+  // PEM or DER ? Use file name suffix, default to PEM
+  bool write_pem = true;
+
+#if 0
+  len = strlen(ifn);
+  if ((ifn[len-3] == 'd' || ifn[len-3] == 'D')
+   && (ifn[len-2] == 'e' || ifn[len-2] == 'E')
+   && (ifn[len-1] == 'r' || ifn[len-1] == 'R')) {
+    write_pem = false;
+  }
+#endif
+
+  if (write_pem) {
+    if ((ret = mbedtls_pk_write_key_pem(pk, keystring, sizeof(keystring))) != 0) {
+      mbedtls_strerror(ret, buf, sizeof(buf));
+      ESP_LOGE(acme_tag, "%s: write_key_pem failed %s (0x%04x)", __FUNCTION__, buf, -ret);
+      free(fn);
+      return;
+    }
+  } else {
+    if ((ret = mbedtls_pk_write_key_der(pk, keystring, sizeof(keystring))) != 0) {
+      mbedtls_strerror(ret, buf, sizeof(buf));
+      ESP_LOGE(acme_tag, "%s: write_key_der failed %s (0x%04x)", __FUNCTION__, buf, -ret);
+      free(fn);
+      return;
+    }
   }
 
   len = strlen((char *)keystring);
@@ -1185,7 +1210,7 @@ void Acme::WritePrivateKey() {
  * Account handling
  * The "onlyExisting" parameter is used to check whether an account pre-exists. Don't use error logging then.
  */
-boolean Acme::RequestNewAccount(const char *contact, boolean onlyExisting) {
+bool Acme::RequestNewAccount(const char *contact, bool onlyExisting) {
   char *msg, *jwk, *payload;
 
   if (directory == 0) {
@@ -1203,9 +1228,9 @@ boolean Acme::RequestNewAccount(const char *contact, boolean onlyExisting) {
 
   if (contact) {	// email address is included
     // Check whether it starts with "mailto:"
-    boolean add_mailto = (strncasecmp(contact, acme_mailto, strlen(acme_mailto)) != 0);
+    bool add_mailto = (strncasecmp(contact, acme_mailto, strlen(acme_mailto)) != 0);
 
-    // Allocate just enough. The 10 is for small stuff + the onlyExisting boolean.
+    // Allocate just enough. The 10 is for small stuff + the onlyExisting bool.
     int len = strlen(new_account_template) + strlen(contact) + 10;
     if (add_mailto)
       len += strlen(acme_mailto);
@@ -1424,7 +1449,7 @@ void Acme::ClearChallenge() {
 /*
  * Read from file
  */
-boolean Acme::ReadAccountInfo() {
+bool Acme::ReadAccountInfo() {
   if (account_fn == 0 || filename_prefix == 0) {
     ESP_LOGE(acme_tag, "%s: ACME files not configured", __FUNCTION__);
     return false;
@@ -1717,7 +1742,7 @@ void Acme::RequestNewOrder(const char *url) {
 /*
  * Read from file
  */
-boolean Acme::ReadOrderInfo() {
+bool Acme::ReadOrderInfo() {
   char *fn = (char *)malloc(strlen(order_fn) + 5 + strlen(filename_prefix));
   sprintf(fn, "%s/%s", filename_prefix, order_fn);
 
@@ -1891,7 +1916,7 @@ void Acme::ReadOrder(JsonObject &json) {
 }
 
 // Store a file on an FTP server
-boolean Acme::ValidateOrder() {
+bool Acme::ValidateOrder() {
   ESP_LOGI(acme_tag, "%s", __FUNCTION__);
   char *localfn = 0, *remotefn = 0;
 
@@ -1958,7 +1983,7 @@ boolean Acme::ValidateOrder() {
   }
 
   // Alert the server
-  boolean r = ValidateAlertServer();
+  bool r = ValidateAlertServer();
 
   // Remove the file
   if (webserver != 0) {
@@ -2002,7 +2027,7 @@ boolean Acme::ValidateOrder() {
  * Send a request to the server to read our token
  * We're only implementing the http-01 protocol here...
  */
-boolean Acme::ValidateAlertServer() {
+bool Acme::ValidateAlertServer() {
   ESP_LOGI(acme_tag, "%s", __FUNCTION__);
   if (http01_ix < 0) {
     ESP_LOGE(acme_tag, "%s: no %s found", __FUNCTION__, acme_http_01);
@@ -2061,6 +2086,13 @@ boolean Acme::ValidateAlertServer() {
   }
 }
 
+/*
+ * The default format of the certificate is application/pem-certificate-chain
+ * The ACME client MAY request other formats by [..] use the media type
+ * "application/pkix-cert" [RFC2585] or "application/pkcs7-mime" [RFC5751] to
+ * request the end-entity certificate in DER format.
+ * Server support for alternate formats is OPTIONAL.
+ */
 void Acme::DownloadCertificate() {
   ESP_LOGD(acme_tag, "%s(%s)", __FUNCTION__, order->certificate);
 
@@ -2069,10 +2101,11 @@ void Acme::DownloadCertificate() {
   ESP_LOGD(acme_tag, "%s: PerformWebQuery(%s,%s,%s,%s)", __FUNCTION__, order->certificate, msg, acme_jose_json, acme_accept_pem_chain);
 
   char *reply = PerformWebQuery(order->certificate, msg, acme_jose_json, acme_accept_pem_chain);
+  // char *reply = PerformWebQuery(order->certificate, msg, acme_jose_json, acme_accept_der);
 
   free(msg);
   if (reply) {
-    ESP_LOGD(acme_tag, "PerformWebQuery -> %s", reply);
+    ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, reply);
   } else {
     ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
   }
@@ -2125,7 +2158,7 @@ void Acme::DownloadCertificate() {
  *   ]
  * }
  */
-boolean Acme::ReadAuthorizationReply(JsonObject &json) {
+bool Acme::ReadAuthorizationReply(JsonObject &json) {
   const char *status = json[acme_json_status];
   if (status == 0) {
     ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply status (null)");
@@ -2923,14 +2956,14 @@ void Acme::ReadCertificate() {
   certificate = 0;
 }
 
-boolean Acme::HaveValidCertificate() {
+bool Acme::HaveValidCertificate() {
   struct timeval now;
   gettimeofday(&now, 0);
 
   return HaveValidCertificate(now.tv_sec);
 }
 
-boolean Acme::HaveValidCertificate(time_t now) {
+bool Acme::HaveValidCertificate(time_t now) {
   if (certificate == 0)
     return false;
   if (now < 1000)

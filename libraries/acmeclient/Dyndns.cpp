@@ -63,7 +63,8 @@
  * Return value is "OK" in case of success.
  */
 
-#include <Arduino.h>
+#include <string.h>
+#include <esp_log.h>
 #include "Dyndns.h"
 
 Dyndns *__dyndns;
@@ -151,11 +152,11 @@ const char *Dyndns::getAuth() {
  *
  * Somewhat more generalized, as the two sites supported differ in setup
  */
-boolean Dyndns::update() {
+bool Dyndns::update() {
   char *query, *header = 0;
   int len;
-  boolean ok = false;
-  // boolean https;
+  bool ok = false;
+  // bool https;
 
   if (provider == DD_NOIP) {
     if (ip != 0)
