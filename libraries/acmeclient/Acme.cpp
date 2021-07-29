@@ -1920,7 +1920,13 @@ bool Acme::ValidateOrder() {
   ESP_LOGI(acme_tag, "%s", __FUNCTION__);
   char *localfn = 0, *remotefn = 0;
 
-  DownloadAuthorizationResource();
+  int error = DownloadAuthorizationResource();
+  if (error != 0) {
+    ESP_LOGE(acme_tag, "%s: status %s, change to %s", __FUNCTION__, order->status, acme_status_invalid);
+    if (order->status) free(order->status);
+    order->status = strdup(acme_status_invalid);
+    return false;
+  }
 
   const char *token = 0;
   http01_ix = -1;
@@ -2199,13 +2205,14 @@ bool Acme::ReadAuthorizationReply(JsonObject &json) {
  *      "signature": "nuSDISbWG8mMgE7H...QyVUL68yzf3Zawps"
  *    }
  */
-void Acme::DownloadAuthorizationResource() {
+int Acme::DownloadAuthorizationResource() {
   ESP_LOGI(acme_tag, "%s", __FUNCTION__);
   if (order == 0 || order->authorizations == 0 || order->authorizations[0] == 0) {
     ESP_LOGE(acme_tag, "%s: null", __FUNCTION__);
-    return;
+    return -1;
   }
 
+  // Loop over authorizations, one at a time
   for (int i=0; order->authorizations[i]; i++) {
     ESP_LOGI(acme_tag, "%s: %d %s", __FUNCTION__, i, order->authorizations[i]);
 
@@ -2213,7 +2220,6 @@ void Acme::DownloadAuthorizationResource() {
 
     ESP_LOGD(acme_tag, "%s: query %s message %s", __FUNCTION__, order->authorizations[i], msg);
 
-    // FIXME only one authorization is picked up
     char *reply = PerformWebQuery(order->authorizations[i], msg, acme_jose_json, 0);
 
     free(msg);
@@ -2229,7 +2235,7 @@ void Acme::DownloadAuthorizationResource() {
     if (! root.success()) {
       ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
       free(reply);
-      return;
+      return -1;
     }
     ESP_LOGD(acme_tag, "%s : JSON opened", __FUNCTION__);
 
@@ -2241,10 +2247,12 @@ void Acme::DownloadAuthorizationResource() {
       ESP_LOGE(acme_tag, "%s: failure %s %s %s", __FUNCTION__, reply_status, reply_type, reply_detail);
 
       free(reply);
-      return;
+      int reply_status_num = root[acme_json_status];
+      return reply_status_num;
     } else if (reply_status == 0) {
       // ESP_LOGE(acme_tag, "%s: null reply_status", __FUNCTION__);
       ESP_LOGE(acme_tag, "%s: null reply_status (reply %s)", __FUNCTION__, reply);
+      return -1;
     } else {
       ESP_LOGD(acme_tag, "%s: reply_status %s", __FUNCTION__, reply_status);
     }
@@ -2252,6 +2260,7 @@ void Acme::DownloadAuthorizationResource() {
     ReadChallenge(root);
     free(reply);
   }
+  return 0;
 }
 
 /*

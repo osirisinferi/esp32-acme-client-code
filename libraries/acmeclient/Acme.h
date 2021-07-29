@@ -258,7 +258,7 @@ class Acme {
     void	EnableLocalWebServer();
     void	DisableLocalWebServer();
 
-    void	DownloadAuthorizationResource();
+    int		DownloadAuthorizationResource();
     bool	CreateValidationFile(const char *localfn, const char *token);
     char	*CreateValidationString(const char *token);
     void	ReadChallenge(JsonObject &);
