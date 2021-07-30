@@ -268,7 +268,8 @@ void Acme::NetworkDisconnected(void *ctx, system_event_t *event) {
  */
 bool Acme::loop(time_t now) {
   if (order) {
-    AcmeProcess(now);
+    if (AcmeProcess(now))
+      return true;
     return false;	// FIXME ? Only look into renewal if we're not processing here.
   }
 
@@ -369,6 +370,8 @@ bool Acme::_ProcessDelay(time_t now) {
  *
  * This function does not start the order process, see RenewCertificate(), but advances it once it's started.
  * This function also doesn't create private keys, use the public API to do that or to supply them.
+ *
+ * Returns true if a (new) certificate was downloaded
  */
 static int process_count = 5;
 
@@ -481,18 +484,24 @@ bool Acme::AcmeProcess(time_t now) {
     }
   }
   if (strcmp(order->status, acme_status_valid) == 0) {
+    bool ok = false;
     ProcessStep(ACME_STEP_DOWNLOAD);
     if (order->certificate) {
-      DownloadCertificate();
+      ok = DownloadCertificate();
       WriteOrderInfo();
     }
 
     if (ws_registered)
       DisableLocalWebServer();
 
-    free(order->status);
-    order->status = strdup(acme_status_downloaded);		// an additional status
+    if (ok) {
+      free(order->status);
+      order->status = strdup(acme_status_downloaded);		// an additional status
+    }
     WriteOrderInfo();
+
+    if (ok)
+      return true;
   }
   ProcessCheck(ACME_STEP_DOWNLOAD, "Download");
 
@@ -508,7 +517,8 @@ bool Acme::AcmeProcess(time_t now) {
     return false;
   }
   
-  return true;
+  // return true;
+  return false;
 }
 
 bool Acme::CreateNewAccount() {
@@ -523,10 +533,10 @@ bool Acme::CreateNewAccount() {
     return false;
   }
 
-  ESP_LOGI(acme_tag, "%s: check whether account already exists", __FUNCTION__);
+  ESP_LOGD(acme_tag, "%s: check whether account already exists", __FUNCTION__);
   // Check if it exists already
   if (RequestNewAccount(email_address, true)) {
-    ESP_LOGI(acme_tag, "%s: ... it does !", __FUNCTION__);
+    ESP_LOGI(acme_tag, "%s: account exists", __FUNCTION__);
     WriteAccountInfo();
     return true;	// Return successfully then
   }
@@ -2099,7 +2109,8 @@ bool Acme::ValidateAlertServer() {
  * request the end-entity certificate in DER format.
  * Server support for alternate formats is OPTIONAL.
  */
-void Acme::DownloadCertificate() {
+bool Acme::DownloadCertificate() {
+  bool ok = true;
   ESP_LOGD(acme_tag, "%s(%s)", __FUNCTION__, order->certificate);
 
   char *msg = MakeMessageKID(order->certificate, "");
@@ -2114,6 +2125,7 @@ void Acme::DownloadCertificate() {
     ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, reply);
   } else {
     ESP_LOGE(acme_tag, "%s: PerformWebQuery -> null", __FUNCTION__);
+    return false;
   }
 
   int fnl = strlen(filename_prefix) + strlen(cert_fn) + 3;
@@ -2125,19 +2137,22 @@ void Acme::DownloadCertificate() {
     size_t fl = fwrite(reply, 1, len, f);
     if (fl != len) {
       ESP_LOGE(acme_tag, "Failed to write certificate to %s, %d of %d written", fn, fl, len);
+      ok = false;
     } else {
       ESP_LOGI(acme_tag, "Wrote certificate to %s", fn);
     }
     fclose(f);
   } else {
     ESP_LOGE(acme_tag, "Could not open %s to write certificate, error %d (%s)", fn, errno, strerror(errno));
+    ok = false;
   }
   free(reply);
 
   if (ws_registered)
     DisableLocalWebServer();
 
-  ReadCertificate();
+  if (ok) ReadCertificate();
+  return ok;
 }
 
 /*
@@ -2173,7 +2188,7 @@ bool Acme::ReadAuthorizationReply(JsonObject &json) {
   ESP_LOGD(acme_tag, "Acme::ReadAuthorizationReply status %s", status);
 
   if (strcmp(status, acme_status_valid) != 0) {
-    ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply invalid status, returning");
+    ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply invalid status (%s), returning", status);
     return false;
   }
 

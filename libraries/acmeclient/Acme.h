@@ -266,7 +266,7 @@ class Acme {
     void	ClearChallenge();
 
     void	FinalizeOrder();
-    void	DownloadCertificate();
+    bool	DownloadCertificate();
     void	ReadFinalizeReply(JsonObject &json);
     char	*GenerateCSR();
     int		CreateAltUrlList(mbedtls_x509write_csr req);
