@@ -991,6 +991,8 @@ bool Acme::RequestNewNonce() {
   memset(&httpc, 0, sizeof(httpc));
   httpc.url = directory->newNonce;
   httpc.event_handler = NonceHttpEvent;
+  if (root_certificate)
+    httpc.cert_pem = root_certificate;	// Required in esp-idf 4.3 for https
 
   client = esp_http_client_init(&httpc);
 
