@@ -87,6 +87,10 @@ Acme::Acme() {
   accountkey = 0;
   certkey = 0;
   rsa = 0;
+  root_certificate = 0;
+  root_certificate_fn = 0;
+
+  wait_for_timesync = time_synced = false;
 
   filename_prefix = "";
 
@@ -244,15 +248,26 @@ void Acme::NetworkConnected(void *ctx, system_event_t *event) {
    * FIX ME it may be a good idea to postpone the network calls.
    * Now we do them at each reboot...
    */
-  QueryAcmeDirectory();
-  RequestNewNonce();
-  RequestNewAccount(email_address, true);	// This looks up the account, doesn't create one.
+  if (time_synced || !wait_for_timesync) {
+    QueryAcmeDirectory();
+    RequestNewNonce();
+    RequestNewAccount(email_address, true);	// This looks up the account, doesn't create one.
 
-  ReadCertificate();
+    ReadCertificate();
+  }
 }
 
 void Acme::NetworkDisconnected(void *ctx, system_event_t *event) {
   connected = false;
+  time_synced = false;
+}
+
+void Acme::WaitForTimesync(bool w) {
+  wait_for_timesync = w;
+}
+
+void Acme::TimeSync(struct timeval *tp) {
+  time_synced = true;
 }
 
 /*
@@ -267,6 +282,17 @@ void Acme::NetworkDisconnected(void *ctx, system_event_t *event) {
  * Returns true if there was a change to the certificate.
  */
 bool Acme::loop(time_t now) {
+  if (wait_for_timesync && !time_synced)
+    return false;
+
+  if (directory == 0) {
+    QueryAcmeDirectory();
+    RequestNewNonce();
+    RequestNewAccount(email_address, true);	// This looks up the account, doesn't create one.
+
+    ReadCertificate();
+  }
+
   if (order) {
     if (AcmeProcess(now))
       return true;
@@ -523,6 +549,8 @@ bool Acme::AcmeProcess(time_t now) {
 
 bool Acme::CreateNewAccount() {
   if (!connected) return false;
+  if (wait_for_timesync && !time_synced)
+    return false;
   if (directory == 0) {
     QueryAcmeDirectory();
     RequestNewNonce();
@@ -857,10 +885,15 @@ char *Acme::Signature(const char *pr, const char *pl) {
  */
 void Acme::QueryAcmeDirectory() {
   if (!connected) return;
+  if (wait_for_timesync && !time_synced)
+    return;
   if (acme_server_url == 0) {
     ESP_LOGI(acme_tag, "%s: no ACME server configured", __FUNCTION__);
     return;
   }
+
+  if (root_certificate_fn != 0 && root_certificate == 0)
+    ReadRootCertificate();
 
   ESP_LOGD(acme_tag, "Querying directory at %s", acme_server_url);
   ClearDirectory();
@@ -2521,7 +2554,9 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
   memset(&httpc, 0, sizeof(httpc));
   httpc.url = query;
   httpc.event_handler = HttpEvent;
-  // httpc.buffer_size = 1024;		// HACK to ensure the nonce header doesn't get cut in two
+  if (root_certificate)
+    httpc.cert_pem = root_certificate;	// Required in esp-idf 4.3 for https
+
   client = esp_http_client_init(&httpc);
 
   if (reply_buffer)
@@ -3191,4 +3226,62 @@ void Acme::DisableLocalWebServer() {
   ws_registered = false;
 
   ESP_LOGI(acme_tag, "%s: disabled local web server", __FUNCTION__);
+}
+
+/*
+ * No memory management at all, just store a pointer.
+ */
+void Acme::setRootCertificateFilename(const char *root_fn) {
+  root_certificate_fn = root_fn;
+}
+
+/*
+ * This is a modified copy of Acme::ReadAccountInfo().
+ * NREAD_INC is reused from that method.
+ */
+bool Acme::ReadRootCertificate() {
+  if (root_certificate_fn == 0 || filename_prefix == 0) {
+    ESP_LOGE(acme_tag, "%s: ACME files not configured", __FUNCTION__);
+    return false;
+  }
+  char *fn = (char *)malloc(strlen(root_certificate_fn) + 5 + strlen(filename_prefix));
+  sprintf(fn, "%s/%s", filename_prefix, root_certificate_fn);
+
+  FILE *f = fopen(fn, "r");
+  if (f == NULL) {
+    ESP_LOGE(acme_tag, "Could not read root certificate from %s, %s", fn, strerror(errno));
+    free(fn);
+    return false;
+  }
+
+  // ESP-IDF VFS over SPIFFS doesn't allow use of fseek to determine file length, so read in chunks in that case
+  // Potential over-allocation is limited to NREAD_INC bytes
+  long len = fseek(f, 0L, SEEK_END);
+  if (len == 0) {
+    len = NREAD_INC;
+  }
+  ESP_LOGI(acme_tag, "Reading root certificate from %s (per %ld)", fn, len);
+  free(fn);
+
+  fseek(f, 0L, SEEK_SET);
+  char *buffer = (char *)malloc(len+1);
+  size_t total = fread((void *)buffer, 1, len, f);
+  buffer[total] = 0;
+  int inc = total;
+  while (inc == NREAD_INC) {
+    len += NREAD_INC;
+    buffer = (char *)realloc((void *)buffer, len + 1);
+    inc = fread((void *)(buffer + total), 1, NREAD_INC, f);
+    total += inc;
+    buffer[total] = 0;
+    ESP_LOGD(acme_tag, "Reading -> %d bytes, total %d ", inc, total);
+  }
+  fclose(f);
+  ESP_LOGD(acme_tag, "%s: %s", __FUNCTION__, buffer);
+
+  if (root_certificate)
+    free((void *)root_certificate);
+  root_certificate = buffer;
+
+  return true;
 }
