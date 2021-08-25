@@ -73,6 +73,7 @@ class Acme {
     void setFtpPassword(const char *);
     void setFtpPath(const char *);
     void setWebServer(httpd_handle_t);
+    void setRootCertificateFilename(const char *);
 
     bool loop(time_t now);			// Return true on a certificate change
     bool HaveValidCertificate(time_t);
@@ -103,6 +104,9 @@ class Acme {
     void ChallengeStart();			// Debug
 
     void ProcessStepByStep(bool);
+    
+    void WaitForTimesync(bool);
+    void TimeSync(struct timeval *);
 
   private:
     constexpr const static char *acme_tag = "Acme";	// For ESP_LOGx calls
@@ -239,6 +243,7 @@ class Acme {
     void	WritePrivateKey(mbedtls_pk_context *pk, const char *fn);
     void	ReadAccountKey();
     void	ReadCertKey();
+    bool	ReadRootCertificate();
 
     bool	RequestNewAccount(const char *contact, bool onlyExisting);
     bool	ReadAccountInfo();
@@ -308,6 +313,8 @@ class Acme {
     mbedtls_pk_context		*certkey;	// Certificate private key
 
     mbedtls_x509_crt		*certificate;
+    const char			*root_certificate_fn;	// File name of the root cert (PEM)
+    const char			*root_certificate;
 
     // FTP server, if we have one
     httpd_handle_t	webserver;
@@ -388,6 +395,12 @@ class Acme {
     const int ACME_STEP_VALIDATE	= 50;
     const int ACME_STEP_FINALIZE	= 60;
     const int ACME_STEP_DOWNLOAD	= 70;
+
+    /*
+     * Time Sync
+     */
+    bool wait_for_timesync;
+    bool time_synced;
 };
 
 extern Acme *acme;
