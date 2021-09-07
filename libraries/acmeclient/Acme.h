@@ -67,6 +67,7 @@ class Acme {
     void setOrderFilename(const char *);
     void setCertKeyFilename(const char *);
     void setFilenamePrefix(const char *);
+    void setFsPrefix(const char *);
     void setCertificateFilename(const char *);
     void setFtpServer(const char *);
     void setFtpUser(const char *);
@@ -74,6 +75,7 @@ class Acme {
     void setFtpPath(const char *);
     void setWebServer(httpd_handle_t);
     void setRootCertificateFilename(const char *);
+    void setRootCertificate(const char *);
 
     bool loop(time_t now);			// Return true on a certificate change
     bool HaveValidCertificate(time_t);
@@ -118,6 +120,7 @@ class Acme {
     const char **alt_urls;			// URL for which we're getting a certificate
     int alt_url_cnt;
     const char *acme_server_url;		// ACME server
+    const char *fs_prefix;			// Root of the filesystem
     const char *filename_prefix;		// e.g. /spiffs
     const char *account_fn;			// Account status json filename, e.g. "account.json"
     const char *order_fn;			// Order status json filename, e.g. "order.json"
