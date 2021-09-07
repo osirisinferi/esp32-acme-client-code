@@ -93,6 +93,7 @@ Acme::Acme() {
   wait_for_timesync = time_synced = false;
 
   filename_prefix = "";
+  fs_prefix = 0;
 
   connected = false;
   stepByStep = false;
@@ -267,6 +268,7 @@ void Acme::WaitForTimesync(bool w) {
 }
 
 void Acme::TimeSync(struct timeval *tp) {
+  ESP_LOGI(acme_tag, "%s", __FUNCTION__);
   time_synced = true;
 }
 
@@ -424,9 +426,9 @@ bool Acme::AcmeProcess(time_t now) {
 
     ESP_LOGI(acme_tag, "%s account 0", __FUNCTION__);
     if (! ReadAccountInfo()) {
-      ESP_LOGD(acme_tag, "%s requesting new account", __FUNCTION__);
+      ESP_LOGI(acme_tag, "%s requesting new account", __FUNCTION__);
       RequestNewAccount(email_address, true);
-      ESP_LOGD(acme_tag, "%s writing new account", __FUNCTION__);
+      ESP_LOGI(acme_tag, "%s writing new account", __FUNCTION__);
       WriteAccountInfo();
     }
     if (account == 0) {
@@ -548,14 +550,23 @@ bool Acme::AcmeProcess(time_t now) {
 }
 
 bool Acme::CreateNewAccount() {
-  if (!connected) return false;
-  if (wait_for_timesync && !time_synced)
+  if (!connected) {
+    ESP_LOGE(acme_tag, "%s: not connected", __FUNCTION__);
     return false;
+  }
+  if (wait_for_timesync && !time_synced) {
+    ESP_LOGE(acme_tag, "%s: timesync NOK, %s %s", __FUNCTION__,
+      wait_for_timesync ? "yes" : "no",
+      time_synced ? "yes" : "no");
+    return false;
+  }
   if (directory == 0) {
+    ESP_LOGE(acme_tag, "%s: directory NULL", __FUNCTION__);
     QueryAcmeDirectory();
     RequestNewNonce();
   }
 
+  ESP_LOGI(acme_tag, "%s: start", __FUNCTION__);
   if (email_address == 0) {
     ESP_LOGE(acme_tag, "%s failed : no email address", __FUNCTION__);
     return false;
@@ -1126,20 +1137,25 @@ void Acme::CreateDirectories(const char *path) {
       // Temporarily terminate path here
       dir[i] = 0;
 
-      // If this directory doesn't exist, create it
-      DIR *dp = opendir(dir);
-      if (dp == 0) {
-        int err = mkdir(dir, 0777);
-        if (err == ESP_OK) {
-	  ESP_LOGD(acme_tag, "%s: created directory %s", __FUNCTION__, dir);
-        } else {
-	  ESP_LOGE(acme_tag, "%s: failed to create directory %s, %d %s", __FUNCTION__, dir,
-	    err, esp_err_to_name(err));
-	  return;
-        }
-      } else {
-        ESP_LOGD(acme_tag, "%s : %s exists", __FUNCTION__, dir);
-	closedir(dp);
+      ESP_LOGD(acme_tag, "%s(%s,%s)", __FUNCTION__, dir, filename_prefix);
+
+      // If this is the prefix, skip
+      if (fs_prefix && strcasecmp(dir, fs_prefix) != 0) {
+	// If this directory doesn't exist, create it
+	DIR *dp = opendir(dir);
+	if (dp == 0) {
+	  int err = mkdir(dir, 0777);
+	  if (err == ESP_OK) {
+	    ESP_LOGD(acme_tag, "%s: created directory %s", __FUNCTION__, dir);
+	  } else {
+	    ESP_LOGE(acme_tag, "%s: failed to create directory %s, %d %s", __FUNCTION__, dir,
+	      err, esp_err_to_name(err));
+	    return;
+	  }
+	} else {
+	  ESP_LOGD(acme_tag, "%s : %s exists", __FUNCTION__, dir);
+	  closedir(dp);
+	}
       }
 
       // Restore path
@@ -1518,7 +1534,7 @@ bool Acme::ReadAccountInfo() {
   if (len == 0) {
     len = NREAD_INC;
   }
-  ESP_LOGI(acme_tag, "Reading Account info from %s (per %ld)", fn, len);
+  ESP_LOGI(acme_tag, "Reading Account info from %s", fn);
   free(fn);
 
   fseek(f, 0L, SEEK_SET);
@@ -3133,6 +3149,10 @@ void Acme::setFilenamePrefix(const char *fn) {
   filename_prefix = fn;
 }
 
+void Acme::setFsPrefix(const char *fn) {
+  fs_prefix = fn;
+}
+
 void Acme::ReadAccountKey() {
   if (account_key_fn && (accountkey = ReadPrivateKey(account_key_fn))) {
     rsa = mbedtls_pk_rsa(*accountkey);
@@ -3237,6 +3257,10 @@ void Acme::setRootCertificateFilename(const char *root_fn) {
   root_certificate_fn = root_fn;
 }
 
+void Acme::setRootCertificate(const char *root_cert) {
+  root_certificate = root_cert;
+}
+
 /*
  * This is a modified copy of Acme::ReadAccountInfo().
  * NREAD_INC is reused from that method.
@@ -3262,7 +3286,7 @@ bool Acme::ReadRootCertificate() {
   if (len == 0) {
     len = NREAD_INC;
   }
-  ESP_LOGI(acme_tag, "Reading root certificate from %s (per %ld)", fn, len);
+  ESP_LOGI(acme_tag, "Reading root certificate from %s", fn);
   free(fn);
 
   fseek(f, 0L, SEEK_SET);
