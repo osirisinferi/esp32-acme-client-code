@@ -110,6 +110,8 @@ class Acme {
     void WaitForTimesync(bool);
     void TimeSync(struct timeval *);
 
+    bool checkConfig();
+
   private:
     constexpr const static char *acme_tag = "Acme";	// For ESP_LOGx calls
 
