@@ -33,7 +33,7 @@
  *   THE SOFTWARE.
  */
 
-#include "secrets.h"
+// #include "secrets.h"
 #include "esp_log.h"
 
 #include "Acme.h"
@@ -179,6 +179,12 @@ Acme::~Acme() {
     free(certificate);
     certificate = 0;
   }
+}
+
+bool Acme::checkConfig() {
+  if (acme_url == 0)
+    return false;
+  return true;
 }
 
 void Acme::GenerateAccountKey() {
@@ -404,6 +410,9 @@ bool Acme::_ProcessDelay(time_t now) {
 static int process_count = 5;
 
 bool Acme::AcmeProcess(time_t now) {
+  if (! checkConfig())
+    return false;		// Silent
+
   ProcessStep(ACME_STEP_NONE);
   ProcessDelay(now);
 
