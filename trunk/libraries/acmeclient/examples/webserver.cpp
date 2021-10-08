@@ -3,7 +3,7 @@
  *
  * This assumes that the IoT device is fully reachable over the Internet.
  *
- * Copyright (c) 2020 Danny Backx
+ * Copyright (c) 2020, 2021 Danny Backx
  *
  * In large part, this is a simplified version of code in esp-idf sample
  * examples/protocols/http_server/file_serving/main/file_server.c .
@@ -23,16 +23,15 @@
  */
 #undef	UNSECURE_I_KNOW_WHAT_I_AM_DOING
 
-#include <Arduino.h>
-#include <esp_spiffs.h>
+#include <esp_log.h>
 #include <esp_wifi.h>
 
-#include <esp_event_loop.h>
+#include <esp_event.h>
 #include <esp_http_server.h>
 #include <dirent.h>
 
 #include "webserver.h"
-#include "Acme.h"
+#include "acmeclient/Acme.h"
 
 static const char *ws_tag = "webserver";
 
