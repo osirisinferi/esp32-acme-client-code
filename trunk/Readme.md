@@ -12,4 +12,4 @@ More info in <a href="https://sourceforge.net/p/esp32-acme-client/code/HEAD/tree
 
 Specific configuration examples and technology overview is in <a href="https://sourceforge.net/p/esp32-acme-client/code/HEAD/tree/trunk/libraries/acmeclient/Configurations.md">Configurations.md</a>.
 
-Important note : the esp-idf esp_http_client_fetch_headers has a bug which causes the nonce in ACME communication to get cut off. Fix by either setting buffer size to e.g. 800 or actually fixing the code. A fixed version is in the components directory.
+Important note : some versions of the esp-idf esp_http_client_fetch_headers have a bug which causes the nonce in ACME communication to get cut off. Fix by either setting buffer size to e.g. 800 or getting fixed code. If you have nonce mismatches, my best bet is you are building with a version of esp-idf with that bug.
