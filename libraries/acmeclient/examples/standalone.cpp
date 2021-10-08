@@ -7,7 +7,7 @@
  *  meaning it will periodically refresh its IP address with a service such as no-ip.com,
  *  as well as its certificate, and do the latter with a small builtin web server.
  *
- * Copyright (c) 2019, 2020 Danny Backx
+ * Copyright (c) 2019, 2020, 2021 Danny Backx
  *
  * License (MIT license):
  *   Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -28,51 +28,58 @@
  *   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  *   THE SOFTWARE.
  */
+#define HAVE_LITTLEFS
+#undef	HAVE_LISTFILES
+#undef	HAVE_REMOVEFILES
 
-#include <Arduino.h>
 #include "StableTime.h"
 #include "acmeclient/Acme.h"
 #include "acmeclient/Dyndns.h"
 
-#include <esp_spiffs.h>
 #include <esp_wifi.h>
-#include <apps/sntp/sntp.h>
+#include <nvs_flash.h>
+
+#include <sntp/sntp.h>
 
 #include "secrets.h"
 
-#include <esp_event_loop.h>
+#include <esp_event.h>
 #include <esp_http_server.h>
-#include "mqtt_client.h"
 #include <freertos/task.h>
 #include <sys/socket.h>
 #include <dirent.h>
 
 #include "webserver.h"
 
-static const char *acmeclient_tag = "ACME client";
+#ifdef HAVE_LITTLEFS
+#include <esp_littlefs.h>
+#endif
+
+#include "root.pem.h"
+
+static const char *acmeclient_tag = "ACME sample client";
 static const char *network_tag = "Network";
+
+static const char *fn_prefix = "/fs";
+static const char *acme_fn_prefix = "/fs/acme/standalone";
 
 // Forward
 void SetupWifi();
 void WaitForWifi();
 void StartWebServer(void);
+static void RemoveFile(const char *fn);
+int ListDir(const char *dn);
+void sntp_sync_notify(struct timeval *tvp);
 
 Acme		*acme = 0;
 time_t		nowts, boot_time;
-boolean		wifi_up = false;
-
-static void RemoveFile(const char *fn) {
-  if (unlink(fn) < 0)
-    ESP_LOGE(acmeclient_tag, "Could not unlink %s", fn);
-  else
-    ESP_LOGI(acmeclient_tag, "Removed %s", fn);
-}
+bool		wifi_up = false;
 
 // Initial function
 void setup(void) {
   esp_err_t err;
 
-  ESP_LOGI(acmeclient_tag, "ACME client (c) 2019, 2020 by Danny Backx");
+  ESP_LOGI(acmeclient_tag, "ACME client (c) 2019, 2020, 2021 by Danny Backx");
 
   // Make stuff from the underlying libraries quieter
   esp_log_level_set("wifi", ESP_LOG_ERROR);
@@ -81,17 +88,37 @@ void setup(void) {
   ESP_LOGD(acmeclient_tag, "Starting WiFi "); 
   SetupWifi();
 
+#ifdef HAVE_LITTLEFS
+  // Initialize LittleFS
+  esp_vfs_littlefs_conf_t lcfg;
+  bzero(&lcfg, sizeof(lcfg));
+
+  lcfg.base_path = fn_prefix;
+  lcfg.partition_label = "spiffs";
+  lcfg.format_if_mount_failed = true;
+  err = esp_vfs_littlefs_register(&lcfg);
+  if (err != ESP_OK)
+    ESP_LOGE(acmeclient_tag, "Failed to register LittleFS %s (%d)", esp_err_to_name(err), err);
+  else
+    ESP_LOGI(acmeclient_tag, "LittleFS started, mount point %s", fn_prefix);
+#else
   // Configure file system access
   esp_vfs_spiffs_conf_t scfg;
-  scfg.base_path = "/spiffs";
+  scfg.base_path = fn_prefix;
   scfg.partition_label = NULL;
   scfg.max_files = 10;
   scfg.format_if_mount_failed = false;
-  if ((err = esp_vfs_spiffs_register(&scfg)) != ESP_OK) {
+  if ((err = esp_vfs_spiffs_register(&scfg)) != ESP_OK)
     ESP_LOGE(acmeclient_tag, "Failed to register SPIFFS %s (%d)", esp_err_to_name(err), err);
-  }
+  else
+    ESP_LOGI(acmeclient_tag, "SPIFFS started, mount point %s", fn_prefix);
+#endif
 
-#if 0
+#ifdef HAVE_LISTFILES
+  ListDir(fn_prefix);
+#endif
+
+#ifdef HAVE_REMOVEFILES
   /*
    * Enabling this code forces the certificate to be renewed, even if it's still very valid.
    */
@@ -112,7 +139,8 @@ void setup(void) {
   stableTime = new StableTime();
 
   acme = new Acme();
-  acme->setFilenamePrefix("/spiffs");
+  acme->setFilenamePrefix(acme_fn_prefix);
+  acme->setFsPrefix(fn_prefix);
   acme->setUrl(SECRET_URL);
   acme->setEmail(SECRET_EMAIL);
 
@@ -128,10 +156,18 @@ void setup(void) {
   acme->setAccountKeyFilename("account.pem");
   acme->setCertKeyFilename("certkey.pem");
   acme->setCertificateFilename("certificate.pem");
+  acme->setRootCertificate(root_pem_string);
 
-  // Watch out before you try this with the production server, it has rate limits, not suitable for debugging.
-  // acme->setAcmeServer("https://acme-v02.api.letsencrypt.org/directory");		// Production server
-  acme->setAcmeServer("https://acme-staging-v02.api.letsencrypt.org/directory");	// Staging server
+  // No action before time has synced via SNTP
+  acme->WaitForTimesync(true);
+
+  /*
+   * Watch out before you try this with the production server.
+   * Production servers have rate limits, not suitable for debugging.
+   */
+  // acme->setAcmeServer("https://acme-v02.api.letsencrypt.org/directory");
+  // Staging server
+  acme->setAcmeServer("https://acme-staging-v02.api.letsencrypt.org/directory");
 
   // Avoid talking to the server at each reboot
   if (! acme->HaveValidCertificate()) {
@@ -178,27 +214,41 @@ void loop()
   }
 
   acme->loop(nowts);
-  delay(2500);
+  vTaskDelay(2500 / portTICK_PERIOD_MS); // delay(2500);
 
   {
     static int nrenews = 0;
 
     if (nrenews == 1 && boot_time > 35000) {
       nrenews--;
-      ESP_LOGI(acmeclient_tag, "Renewing certificate from simple.cpp");
+      ESP_LOGI(acmeclient_tag, "Renewing certificate from standalone.cpp");
       acme->RenewCertificate();
     }
   }
 }
 
 extern "C" {
-  /*
-   * Arduino startup code, if you build with ESP-IDF without the startup code enabled.
-   */
+  // Minimal ESP32 startup code, if not using Arduino
   void app_main() {
-    initArduino();
+    // Initialize NVS
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES) {
+      const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+        ESP_PARTITION_SUBTYPE_DATA_NVS, NULL);
+      if (partition != NULL) {
+	err = esp_partition_erase_range(partition, 0, partition->size);
+	if (!err) {
+	  err = nvs_flash_init();
+	} else {
+	  ESP_LOGE(acmeclient_tag, "Failed to format the broken NVS partition!");
+	}
+      }
+    }
+    if (err != ESP_OK) {
+      ESP_LOGE(acmeclient_tag, "nvs_flash_init -> %d %s", err, esp_err_to_name(err));
+      while (1) ;
+    }
 
-    Serial.begin(115200);
     setup();
     while (1)
       loop();
@@ -224,80 +274,79 @@ struct mywifi {
   { NULL, NULL, NULL}
 };
 
-static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
-  switch (event->event_id) {
-    case SYSTEM_EVENT_STA_START:
-      esp_wifi_connect();
-      break;
-
-    case SYSTEM_EVENT_GOT_IP6:
-      ESP_LOGI(network_tag, "We have an IPv6 address");
-      // FIXME
-      break;
-
-    case SYSTEM_EVENT_STA_GOT_IP:
-      ESP_LOGI(network_tag, "SYSTEM_EVENT_STA_GOT_IP");
-      wifi_up = true;
-
-      sntp_init();
-#ifdef	NTP_SERVER_0
-      sntp_setservername(0, (char *)NTP_SERVER_0);
-#endif
-#ifdef	NTP_SERVER_1
-      sntp_setservername(1, (char *)NTP_SERVER_1);
-#endif
-
-      if (acme) acme->NetworkConnected(ctx, event);
-
-      break;
-
-    case SYSTEM_EVENT_STA_DISCONNECTED:
-      wifi_up = false;
-      delay(1000);
-      esp_wifi_connect();
-      // Uh oh
-      break;
-
-    default:
-      break;
+/*
+ * esp-idf-4.x style networking event handlers
+ */
+void event_handler(void *ctx, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+  if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    esp_wifi_connect();
   }
-  return ESP_OK;
 }
 
-/*
- * This needs to be done before we can query the adapter MAC,
- * which we need to pass to Config.
- * After this, we can also await attachment to a network.
- */
+void discon_event_handler(void *ctx, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+  ESP_LOGD(network_tag, "retry to connect to the AP");
+
+  /*
+   * We were connected but lost the network. So gracefully shut down open connections,
+   * and then try to reconnect to the network.
+   */
+  ESP_LOGI(network_tag, "STA_DISCONNECTED, restarting");
+
+  if (acme) acme->NetworkDisconnected(ctx, (system_event_t *)event_data);
+
+  esp_wifi_connect();
+}
+
+void ip_event_handler(void *ctx, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+  ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+
+  ESP_LOGI(network_tag, "Network connected, ip " IPSTR, IP2STR(&event->ip_info.ip));
+  wifi_up = true;
+
+  if (acme) {
+    // Note only start running ACME if we're on a network configured for it
+    acme->NetworkConnected(ctx, (system_event_t *)event_data);
+  }
+
+  sntp_init();
+#ifdef	NTP_SERVER_0
+  sntp_setservername(0, (char *)NTP_SERVER_0);
+#endif
+#ifdef	NTP_SERVER_1
+  sntp_setservername(1, (char *)NTP_SERVER_1);
+#endif
+  sntp_set_time_sync_notification_cb(sntp_sync_notify);
+}
+
 void SetupWifi(void)
 {
   esp_err_t err;
+  esp_event_handler_instance_t inst_any_id, inst_got_ip, inst_discon;
 
-  tcpip_adapter_init();
-  err = esp_event_loop_init(wifi_event_handler, NULL);
-  if (err != ESP_OK) {
-      /*
-       * ESP_FAIL here means we've already done this, see components/esp32/event_loop.c :
-       * esp_err_t esp_event_loop_init(system_event_cb_t cb, void *ctx)
-       * {
-       *     if (s_event_init_flag) {
-       *         return ESP_FAIL;
-       *     }
-       */
-  }
+  esp_netif_init();
+  esp_event_loop_create_default();
+  esp_netif_create_default_wifi_sta();
+
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   err = esp_wifi_init(&cfg);
   if (err != ESP_OK) {
-      ESP_LOGE(network_tag, "Failed esp_wifi_init, reason %d", (int)err);
+      ESP_LOGE(network_tag, "Failed esp_wifi_init, reason %d %s", (int)err, esp_err_to_name(err));
       // FIXME
       return;
   }
   err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
   if (err != ESP_OK) {
-      ESP_LOGE(network_tag, "Failed esp_wifi_set_storage, reason %d", (int)err);
+      ESP_LOGE(network_tag, "Failed esp_wifi_set_storage, reason %d %s", (int)err, esp_err_to_name(err));
       // FIXME
       return;
   }
+
+  esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+    event_handler, NULL, &inst_any_id);
+  esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, 
+    discon_event_handler, NULL, &inst_discon);
+  esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+    ip_event_handler, NULL, &inst_got_ip);
 }
 
 void WaitForWifi(void)
@@ -332,7 +381,7 @@ void WaitForWifi(void)
       // FIXME
       return;
     }
-    err = esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
+    err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (err != ESP_OK) {
       ESP_LOGE(network_tag, "Failed to set wifi config");
       // FIXME
@@ -347,7 +396,7 @@ void WaitForWifi(void)
     }
 
     for (int cnt = 0; cnt < 40; cnt++) {
-      delay(100);
+      vTaskDelay(100 / portTICK_PERIOD_MS); // delay(100);
       if (wifi_up) {
         ESP_LOGI(network_tag, ".. connected to wifi (attempt %d)", cnt+1);
         return;
@@ -365,4 +414,59 @@ void NoIP() {
     ESP_LOGI(acmeclient_tag, "succeeded");
   else
     ESP_LOGE(acmeclient_tag, "failed");
+}
+
+static void RemoveFile(const char *fn) {
+  if (unlink(fn) < 0)
+    ESP_LOGE(acmeclient_tag, "Could not unlink %s", fn);
+  else
+    ESP_LOGI(acmeclient_tag, "Removed %s", fn);
+}
+
+/*
+ * List all files on LittleFS
+ */
+int ListDir(const char *dn) {
+  DIR *d = opendir(dn);
+  struct dirent *de;
+  int count = 0;
+
+  if (d == 0) {
+    ESP_LOGD("fs", "%s: dir null", __FUNCTION__);
+    return 0;
+  }
+
+  rewinddir(d);
+  while (1) {
+    de = readdir(d);
+    if (de == 0) {
+      ESP_LOGD("fs", "Dir %s contained %d entries", dn, count);
+      closedir(d);
+      return count;
+    }
+    count++;
+    ESP_LOGI("fs", "Dir %s entry %d : %s", dn, count, de->d_name);
+
+    // Recursively descend
+    if (de->d_type & DT_DIR) {
+      // This doesn't happen with current implementation, but let's be sure
+      // Don't descend into current directory
+      if (strcmp(de->d_name, ".") == 0)
+        continue;
+
+      int len = strlen(dn) + strlen(de->d_name) + 2;
+      char *n = (char *)malloc(len);		// Note freed locally
+      strcpy(n, dn);
+      strcat(n, "/");
+      strcat(n, de->d_name);
+      count += ListDir(n);
+      free(n);
+    }
+  }
+}
+
+void sntp_sync_notify(struct timeval *tvp) {
+  ESP_LOGE(acmeclient_tag, "%s", __FUNCTION__);
+  if (acme)
+    acme->TimeSync(tvp);
 }
