@@ -67,14 +67,18 @@ static const char *acme_fn_prefix = "/fs/acme/standalone";
 void SetupWifi();
 void WaitForWifi();
 void StartWebServer(void);
-static void RemoveFile(const char *fn);
-int ListDir(const char *dn);
 void sntp_sync_notify(struct timeval *tvp);
+
+#ifdef	HAVE_LISTFILES
+int ListDir(const char *dn);
+#endif
+#ifdef	HAVE_REMOVEFILES
+static void RemoveFile(const char *fn);
+#endif
 
 Acme		*acme = 0;
 time_t		nowts, boot_time;
 bool		wifi_up = false;
-bool		time_set = false;
 
 // Initial function
 void setup(void) {
@@ -174,8 +178,10 @@ void setup(void) {
   /*
    * Watch out before you try this with the production server.
    * Production servers have rate limits, not suitable for debugging.
+   *
+   * acme->setAcmeServer("https://acme-v02.api.letsencrypt.org/directory");
    */
-  // acme->setAcmeServer("https://acme-v02.api.letsencrypt.org/directory");
+
   // Staging server
   acme->setAcmeServer("https://acme-staging-v02.api.letsencrypt.org/directory");
 
@@ -193,14 +199,34 @@ void setup(void) {
 
   StartWebServer();
 
-  if (! acme->HaveValidCertificate()) {
-    acme->CreateNewAccount();
-    acme->CreateNewOrder();
-  } else {
-    ESP_LOGI(acmeclient_tag, "Certificate is valid, not obnoxiously querying ACME server because we happen to reboot");
-  }
-
   ESP_LOGD(acmeclient_tag, "... end of setup()");
+}
+
+/*
+ * This is called when we get info from SNTP.
+ * Typically this is just after startup (actually, after you connect to a network),
+ * or once per hour.
+ */
+void sntp_sync_notify(struct timeval *tvp) {
+  ESP_LOGI(acmeclient_tag, "%s", __FUNCTION__);
+  if (acme)
+    acme->TimeSync(tvp);
+
+  if (acme) {
+    static bool inited = false;
+
+    // Make sure we run this only once
+    if (! inited) {
+      inited = true;
+      if (! acme->HaveValidCertificate()) {
+        // Kickstart ACME, disable if this is not desired
+	acme->CreateNewAccount();
+	acme->CreateNewOrder();
+      } else {
+        ESP_LOGI(acmeclient_tag, "Certificate is valid, not obnoxiously querying ACME server because we happen to reboot");
+      }
+    }
+  }
 }
 
 void loop()
@@ -223,35 +249,12 @@ void loop()
     sprintf(msg, "ACME client boot at %s", ts);
   }
 
-  if (time_set && acme) {
-    static bool inited = false;
-
-    if (! inited) {
-      inited = true;
-      if (! acme->HaveValidCertificate()) {
-        // Kickstart ACME, disable if this is not desired
-	acme->CreateNewAccount();
-	acme->CreateNewOrder();
-      }
-    }
-  }
   bool cert_upd = acme->loop(nowts);
   if (cert_upd) {
     // network->CertificateUpdated();
   }
 
   vTaskDelay(2500 / portTICK_PERIOD_MS); // delay(2500);
-#if 0
-  {
-    static int nrenews = 0;
-
-    if (nrenews == 1 && boot_time > 35000) {
-      nrenews--;
-      ESP_LOGI(acmeclient_tag, "Renewing certificate from standalone.cpp");
-      acme->RenewCertificate();
-    }
-  }
-#endif
 }
 
 extern "C" {
@@ -341,6 +344,9 @@ void ip_event_handler(void *ctx, esp_event_base_t event_base, int32_t event_id, 
 #endif
 #ifdef	NTP_SERVER_1
   sntp_setservername(1, (char *)NTP_SERVER_1);
+#endif
+#if (!defined(NTP_SERVER_0)) && (!defined(NTP_SERVER_1))
+# error This will not work without NTP
 #endif
   sntp_set_time_sync_notification_cb(sntp_sync_notify);
 }
@@ -443,13 +449,16 @@ void NoIP() {
     ESP_LOGE(acmeclient_tag, "failed");
 }
 
+#ifdef HAVE_REMOVEFILES
 static void RemoveFile(const char *fn) {
   if (unlink(fn) < 0)
     ESP_LOGE(acmeclient_tag, "Could not unlink %s", fn);
   else
     ESP_LOGI(acmeclient_tag, "Removed %s", fn);
 }
+#endif
 
+#ifdef	HAVE_LISTFILES
 /*
  * List all files on LittleFS
  */
@@ -491,10 +500,4 @@ int ListDir(const char *dn) {
     }
   }
 }
-
-void sntp_sync_notify(struct timeval *tvp) {
-  ESP_LOGE(acmeclient_tag, "%s", __FUNCTION__);
-  if (acme)
-    acme->TimeSync(tvp);
-  time_set = true;
-}
+#endif
