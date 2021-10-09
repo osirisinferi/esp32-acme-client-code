@@ -124,3 +124,13 @@ The supporting functions for DynDNS allow you to have active FQDN, even on more 
       }
     }
 
+Versions since October 2021 are based on esp-idf v4.3 (previously v3.x).
+Noteworthy changes for that :
+- you'll need to supply a file with a root certificate. Any call to LetsEncrypt.org is over
+  https and on v4.3 this requires such a certificate. Use these methods to provide it :
+    void setRootCertificateFilename(const char *);
+    void setRootCertificate(const char *);
+- as a consequence, communication only works when the time is set, which adds to the
+  complexity of your application as it basically all needs to triggered outside of
+  initialisation code. In the sample application, I chose to use the loop() but
+  sntp_sync_notify() would also have been a possibility.

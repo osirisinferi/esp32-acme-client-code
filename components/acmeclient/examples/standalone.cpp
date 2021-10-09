@@ -74,6 +74,7 @@ void sntp_sync_notify(struct timeval *tvp);
 Acme		*acme = 0;
 time_t		nowts, boot_time;
 bool		wifi_up = false;
+bool		time_set = false;
 
 // Initial function
 void setup(void) {
@@ -122,9 +123,17 @@ void setup(void) {
   /*
    * Enabling this code forces the certificate to be renewed, even if it's still very valid.
    */
-  RemoveFile("/spiffs/account.json");
-  RemoveFile("/spiffs/order.json");
-  RemoveFile("/spiffs/certificate.pem");
+  // RemoveFile("/fs/config.json-");
+  // RemoveFile("/fs/config.json.production");
+  // RemoveFile("/fs/config.json.staging");
+  // RemoveFile("/fs/acme/staging/certificate.pem");
+  // RemoveFile("/fs/acme/staging/certkey.pem");
+  // RemoveFile("/fs/acme/standalone/account.json");
+
+  RemoveFile("/fs/acme/standalone/certificate.pem");
+  
+  // RemoveFile("/fs/acme/standalone/account.pem");
+  // RemoveFile("/fs/acme/standalone/certkey.pem");
 #endif
 
   /*
@@ -137,6 +146,7 @@ void setup(void) {
   sntp_setoperatingmode(SNTP_OPMODE_POLL);
   setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1);
   stableTime = new StableTime();
+  tzset();
 
   acme = new Acme();
   acme->setFilenamePrefix(acme_fn_prefix);
@@ -213,9 +223,25 @@ void loop()
     sprintf(msg, "ACME client boot at %s", ts);
   }
 
-  acme->loop(nowts);
-  vTaskDelay(2500 / portTICK_PERIOD_MS); // delay(2500);
+  if (time_set && acme) {
+    static bool inited = false;
 
+    if (! inited) {
+      inited = true;
+      if (! acme->HaveValidCertificate()) {
+        // Kickstart ACME, disable if this is not desired
+	acme->CreateNewAccount();
+	acme->CreateNewOrder();
+      }
+    }
+  }
+  bool cert_upd = acme->loop(nowts);
+  if (cert_upd) {
+    // network->CertificateUpdated();
+  }
+
+  vTaskDelay(2500 / portTICK_PERIOD_MS); // delay(2500);
+#if 0
   {
     static int nrenews = 0;
 
@@ -225,6 +251,7 @@ void loop()
       acme->RenewCertificate();
     }
   }
+#endif
 }
 
 extern "C" {
@@ -469,4 +496,5 @@ void sntp_sync_notify(struct timeval *tvp) {
   ESP_LOGE(acmeclient_tag, "%s", __FUNCTION__);
   if (acme)
     acme->TimeSync(tvp);
+  time_set = true;
 }
