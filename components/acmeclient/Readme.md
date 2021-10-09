@@ -132,5 +132,5 @@ Noteworthy changes for that :
     void setRootCertificate(const char *);
 - as a consequence, communication only works when the time is set, which adds to the
   complexity of your application as it basically all needs to triggered outside of
-  initialisation code. In the sample application, I chose to use the loop() but
-  sntp_sync_notify() would also have been a possibility.
+  initialisation code. In the sample application, this is handled in sntp_sync_notify() 
+  but it can also be put in loop(), which is less readable.
