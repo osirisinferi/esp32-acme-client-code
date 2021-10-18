@@ -211,10 +211,18 @@ bool Dyndns::update() {
   // GET
   esp_err_t err = esp_http_client_perform(http_client);
   if (err == ESP_OK) {
-    ESP_LOGD(dyndns_tag, "HTTP GET Status = %d, content_length = %d",
-      esp_http_client_get_status_code(http_client),
-      esp_http_client_get_content_length(http_client));
-    ok = true;
+    if (esp_http_client_get_status_code(http_client) == 200) {
+      ok = true;
+      ESP_LOGD(dyndns_tag, "HTTP GET Status = %d, content_length = %d",
+        esp_http_client_get_status_code(http_client),
+        esp_http_client_get_content_length(http_client));
+    } else {
+      // Any other code than 200 is probably not good
+      ok = false;
+      ESP_LOGE(dyndns_tag, "HTTP GET Status = %d, content_length = %d",
+        esp_http_client_get_status_code(http_client),
+        esp_http_client_get_content_length(http_client));
+    }
   } else {
     ESP_LOGE(dyndns_tag, "HTTP GET request failed: %s", esp_err_to_name(err));
   }
@@ -239,7 +247,7 @@ bool Dyndns::update() {
 
 #if 0
   if (err == 0) {
-    ESP_LOGI(dyndns_tag, "Success ");
+    ESP_LOGD(dyndns_tag, "Success ");
   } else if (err == 0) {
     // timeout
     ESP_LOGE(dyndns_tag, "Timeout");
