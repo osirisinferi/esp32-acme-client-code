@@ -29,6 +29,8 @@ Build notes :
     CONFIG_MAIN_TASK_STACK_SIZE=6144
   in the ESP-IDF "make menuconfig".
 
+- as from esp-idf v4.3 you need to enable "Basic Auth" support for the esp-http-client.
+
 - building the example requires you to copy an include file and change its contents to match your
   local requirements (e.g. your WiFi credentials) :
     % cp main/secrets.h.sample main/secrets.h
