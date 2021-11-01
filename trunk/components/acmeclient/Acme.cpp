@@ -33,7 +33,6 @@
  *   THE SOFTWARE.
  */
 
-// #include "secrets.h"
 #include "esp_log.h"
 
 #include "Acme.h"
@@ -570,9 +569,13 @@ bool Acme::CreateNewAccount() {
     return false;
   }
   if (directory == 0) {
-    ESP_LOGE(acme_tag, "%s: directory NULL", __FUNCTION__);
+    ESP_LOGD(acme_tag, "%s: directory NULL", __FUNCTION__);
     QueryAcmeDirectory();
     RequestNewNonce();
+  }
+  if (directory == 0) {
+    ESP_LOGE(acme_tag, "%s: directory NULL", __FUNCTION__);
+    return false;
   }
 
   ESP_LOGI(acme_tag, "%s: start", __FUNCTION__);
@@ -581,7 +584,7 @@ bool Acme::CreateNewAccount() {
     return false;
   }
 
-  ESP_LOGD(acme_tag, "%s: check whether account already exists", __FUNCTION__);
+  ESP_LOGI(acme_tag, "%s: check whether account already exists", __FUNCTION__);
   // Check if it exists already
   if (RequestNewAccount(email_address, true)) {
     ESP_LOGI(acme_tag, "%s: account exists", __FUNCTION__);
@@ -914,8 +917,12 @@ void Acme::QueryAcmeDirectory() {
 
   if (root_certificate_fn != 0 && root_certificate == 0)
     ReadRootCertificate();
+  if (root_certificate == 0) {
+    ESP_LOGE(acme_tag, "%s: failed, no root certificate", __FUNCTION__);
+    return;
+  }
 
-  ESP_LOGD(acme_tag, "Querying directory at %s", acme_server_url);
+  ESP_LOGI(acme_tag, "Querying directory at %s", acme_server_url);
   ClearDirectory();
 
   char *reply = PerformWebQuery(acme_server_url, 0, 0, 0);
@@ -927,9 +934,16 @@ void Acme::QueryAcmeDirectory() {
 
   ESP_LOGD(acme_tag, "%s: parsing JSON %s", __FUNCTION__, reply);
 
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(reply);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, reply);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "Could not parse JSON");
     free(reply);
     return;
@@ -1339,9 +1353,16 @@ bool Acme::RequestNewAccount(const char *contact, bool onlyExisting) {
   // Decode JSON reply
   ESP_LOGD(acme_tag, "%s: parsing JSON %s", __FUNCTION__, reply);
 
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(reply);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, reply);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
     free(reply);
     return false;
@@ -1372,7 +1393,12 @@ bool Acme::RequestNewAccount(const char *contact, bool onlyExisting) {
 }
 
 // FIXME protect against missing fields, will now call strdup(0)
-void Acme::ReadAccount(JsonObject &json) {
+#ifdef ARDUINOJSON_5
+void Acme::ReadAccount(JsonObject &json)
+#else
+void Acme::ReadAccount(DynamicJsonDocument &json)
+#endif
+{
   account = (Account *)malloc(sizeof(Account));
   memset((void *)account, 0, sizeof(Account));
 
@@ -1412,7 +1438,11 @@ void Acme::ReadAccount(JsonObject &json) {
   BZZ(createdAt);
   BZZ(status);
 
+#ifdef ARDUINOJSON_5
   JsonArray &jca = json["contact"];
+#else
+  DynamicJsonDocument jca = json["contact"];
+#endif
   ESP_LOGD(acme_tag, "%s : %d contacts", __FUNCTION__, jca.size());
   account->contact = (char **)calloc(jca.size()+1, sizeof(char *));
   account->contact[jca.size()] = 0;
@@ -1425,8 +1455,6 @@ void Acme::ReadAccount(JsonObject &json) {
   // When reading from our saved file, this is in the JSON.
   // So only update the field if we read the JSON parameter, otherwise don't do a thing.
   const char *l = json["location"];
-  // if (l)
-    // location = strdup(l);
 
   if (account->location)
     free(account->location);
@@ -1451,9 +1479,6 @@ void Acme::ClearAccount() {
     free(account);
     account = 0;
   }
-
-  // if (location) free(location);
-  // location = 0;
 }
 
 void Acme::ClearOrderContent() {
@@ -1562,9 +1587,16 @@ bool Acme::ReadAccountInfo() {
   fclose(f);
   ESP_LOGD(acme_tag, "%s: %s", __FUNCTION__, buffer);
 
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(buffer);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, buffer);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
     free(buffer);
     return false;
@@ -1595,23 +1627,39 @@ void Acme::WriteAccountInfo() {
   ESP_LOGI(acme_tag, "Writing account info into %s", fn);
   free(fn);
 
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &jo = jb.createObject();
+#else
+  DynamicJsonDocument jo(1024);
+#endif
   jo[acme_json_status] = account->status;
   jo[acme_json_location] = account->location;
 
   // contact array must be NULL terminated
+#ifdef ARDUINOJSON_5
   JsonArray &jca = jo.createNestedArray(acme_json_contact);
+#else
+  DynamicJsonDocument jca = jo.createNestedArray(acme_json_contact);
+#endif
   for (int i=0; account->contact[i]; i++)
     jca.add(account->contact[i]);
 
+#ifdef ARDUINOJSON_5
   JsonObject &jk = jo.createNestedObject(acme_json_key);
+#else
+  DynamicJsonDocument jk = jo.createNestedObject(acme_json_key);
+#endif
   jk[acme_json_kty] = account->key_type;
   jk[acme_json_n] = account->key_id;
   jk[acme_json_e] = account->key_e;
 
   char *output = (char *)malloc(1536);	// FIX ME
+#ifdef ARDUINOJSON_5
   jo.printTo(output, 1536);		// FIX ME
+#else
+  serializeJson(jo, output, 1536);
+#endif
 
   fprintf(f, "%s", output);
   fclose(f);
@@ -1704,9 +1752,16 @@ void Acme::RequestNewOrder(const char *url, const char **alt_urls) {
   }
 
   // Decode JSON reply
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(reply);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, reply);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
     free(reply);
     return;
@@ -1778,9 +1833,16 @@ void Acme::RequestNewOrder(const char *url) {
   }
 
   // Decode JSON reply
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(reply);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, reply);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
     free(reply);
     return;
@@ -1852,9 +1914,16 @@ bool Acme::ReadOrderInfo() {
   buffer[total] = 0;
   ESP_LOGI(acme_tag, "%s: %s", __FUNCTION__, buffer);
 
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(buffer);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, buffer);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
     free(buffer);
     return false;
@@ -1891,8 +1960,12 @@ void Acme::WriteOrderInfo() {
   ESP_LOGI(acme_tag, "Writing order info into %s", fn);
   free(fn);
 
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &jo = jb.createObject();
+#else
+  DynamicJsonDocument jo(1024);
+#endif
   if (order->status) jo[acme_json_status] = order->status;
   if (order->status) jo[acme_json_expires] = order->expires;
   if (order->finalize) jo[acme_json_finalize] = order->finalize;
@@ -1900,9 +1973,17 @@ void Acme::WriteOrderInfo() {
 
   if (order->identifiers) {
     // identifiers array must be NULL terminated
+#ifdef ARDUINOJSON_5
     JsonArray &jia = jo.createNestedArray(acme_json_identifiers);
+#else
+    DynamicJsonDocument jia = jo.createNestedArray(acme_json_identifiers);
+#endif
     for (int i=0; order->identifiers[i]._type != 0 || order->identifiers[i].value != 0; i++) {
+#ifdef ARDUINOJSON_5
       JsonObject &jie = jia.createNestedObject();
+#else
+      DynamicJsonDocument jie = jia.createNestedObject();
+#endif
       jie[acme_json_type] = order->identifiers[i]._type;
       jie[acme_json_value] = order->identifiers[i].value;
     }
@@ -1910,13 +1991,21 @@ void Acme::WriteOrderInfo() {
 
   if (order->authorizations) {
     // authorizations array must be NULL terminated
+#ifdef ARDUINOJSON_5
     JsonArray &jaa = jo.createNestedArray(acme_json_authorizations);
+#else
+    DynamicJsonDocument jaa = jo.createNestedArray(acme_json_authorizations);
+#endif
     for (int i=0; order->authorizations[i]; i++)
       jaa.add(order->authorizations[i]);
   }
 
   char *output = (char *)malloc(1536);	// FIX ME
+#ifdef ARDUINOJSON_5
   jo.printTo(output, 1536);		// FIX ME
+#else
+  serializeJson(jo, output, 1536);
+#endif
 
   fprintf(f, "%s", output);
   fclose(f);
@@ -1927,7 +2016,12 @@ void Acme::WriteOrderInfo() {
 
 /*
  */
-void Acme::ReadOrder(JsonObject &json) {
+#ifdef ARDUINOJSON_5
+void Acme::ReadOrder(JsonObject &json)
+#else
+void Acme::ReadOrder(DynamicJsonDocument &json)
+#endif
+{
   // Treat the case separately where we have an empty order structure : it's brand new so no need to free/reallocate
   if (order && order->status != 0)
     ClearOrder();
@@ -1963,7 +2057,12 @@ void Acme::ReadOrder(JsonObject &json) {
 
 #undef BZZ
 
+#ifdef ARDUINOJSON_5
   JsonArray &jia = json["identifiers"];
+#else
+  DynamicJsonDocument jia = json["identifiers"];
+#endif
+
   ESP_LOGD(acme_tag, "%s : %d identifiers", __FUNCTION__, jia.size());
   order->identifiers = (Identifier *)calloc(jia.size()+1, sizeof(Identifier));
   order->identifiers[jia.size()]._type = 0;
@@ -1975,7 +2074,11 @@ void Acme::ReadOrder(JsonObject &json) {
     order->identifiers[i].value = strdup(iv);
   }
 
+#ifdef ARDUINOJSON_5
   JsonArray &jaa = json["authorizations"];
+#else
+  DynamicJsonDocument jaa = json["authorizations"];
+#endif
   ESP_LOGD(acme_tag, "%s : %d authorizations", __FUNCTION__, jaa.size());
   order->authorizations = (char **)calloc(jia.size()+1, sizeof(char *));
   order->authorizations[jaa.size()] = 0;
@@ -2125,9 +2228,16 @@ bool Acme::ValidateAlertServer() {
   }
 
   // Decode JSON reply
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(reply);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, reply);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
     free(reply);
     return false;
@@ -2188,15 +2298,33 @@ bool Acme::DownloadCertificate() {
     return false;
   }
 
+  if (ws_registered)
+    DisableLocalWebServer();
+
+  /*
+   * We requested PEM so that's what we got.
+   * If the caller wants DER, then the certificate file name should end with that suffix.
+   * Detect that and try to convert.
+   */
+  size_t cert_len = strlen(reply);
+  char *cert_ptr = reply;
+
+  const char *suffix = cert_fn + strlen(cert_fn) - 3;
+  if (strcasecmp(suffix, "der") == 0) {
+    ESP_LOGE(acme_tag, "%s: need to convert format for writing into %s", __FUNCTION__, cert_fn);
+  }
+
+  /*
+   * Ok so now actually save.
+   */
   int fnl = strlen(filename_prefix) + strlen(cert_fn) + 3;
   char *fn = (char *)malloc(fnl);
   sprintf(fn, "%s/%s", filename_prefix, cert_fn);
   FILE *f = fopen(fn, "w");
   if (f) {
-    size_t len = strlen(reply);
-    size_t fl = fwrite(reply, 1, len, f);
-    if (fl != len) {
-      ESP_LOGE(acme_tag, "Failed to write certificate to %s, %d of %d written", fn, fl, len);
+    size_t fl = fwrite(cert_ptr, 1, cert_len, f);
+    if (fl != cert_len) {
+      ESP_LOGE(acme_tag, "Failed to write certificate to %s, %d of %d written", fn, fl, cert_len);
       ok = false;
     } else {
       ESP_LOGI(acme_tag, "Wrote certificate to %s", fn);
@@ -2207,9 +2335,6 @@ bool Acme::DownloadCertificate() {
     ok = false;
   }
   free(reply);
-
-  if (ws_registered)
-    DisableLocalWebServer();
 
   if (ok) ReadCertificate();
   return ok;
@@ -2239,7 +2364,12 @@ bool Acme::DownloadCertificate() {
  *   ]
  * }
  */
-bool Acme::ReadAuthorizationReply(JsonObject &json) {
+#ifdef ARDUINOJSON_5
+bool Acme::ReadAuthorizationReply(JsonObject &json)
+#else
+bool Acme::ReadAuthorizationReply(DynamicJsonDocument &json)
+#endif
+{
   const char *status = json[acme_json_status];
   if (status == 0) {
     ESP_LOGE(acme_tag, "Acme::ReadAuthorizationReply status (null)");
@@ -2305,9 +2435,16 @@ int Acme::DownloadAuthorizationResource() {
     }
 
     // Decode JSON reply
-    DynamicJsonBuffer jb;
-    JsonObject &root = jb.parseObject(reply);
-    if (! root.success()) {
+#ifdef ARDUINOJSON_5
+  DynamicJsonBuffer jb;
+  JsonObject &root = jb.parseObject(reply);
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, reply);
+  if (je)
+#endif
+    {
       ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
       free(reply);
       return -1;
@@ -2431,7 +2568,12 @@ char *Acme::CreateValidationString(const char *token) {
   return r;					// Caller must free
 }
 
-void Acme::ReadChallenge(JsonObject &json) {
+#ifdef ARDUINOJSON_5
+void Acme::ReadChallenge(JsonObject &json)
+#else
+void Acme::ReadChallenge(DynamicJsonDocument &json)
+#endif
+{
   challenge = (Challenge *)malloc(sizeof(Challenge));
   memset((void *)challenge, 0, sizeof(Challenge));
 
@@ -2461,7 +2603,11 @@ void Acme::ReadChallenge(JsonObject &json) {
 
   // we're not reading the identifier, as we're not using it
 
+#ifdef ARDUINOJSON_5
   JsonArray &jca = json["challenges"];
+#else
+  DynamicJsonDocument jca = json["challenges"];
+#endif
   ESP_LOGD(acme_tag, "%s : %d challenges", __FUNCTION__, jca.size());
   challenge->challenges = (ChallengeItem *)calloc(jca.size()+1, sizeof(ChallengeItem));
   // Null-terminate
@@ -2953,9 +3099,16 @@ void Acme::FinalizeOrder() {
   }
 
   // Decode JSON reply
+#ifdef ARDUINOJSON_5
   DynamicJsonBuffer jb;
   JsonObject &root = jb.parseObject(reply);
-  if (! root.success()) {
+  if (! root.success())
+#else
+  DynamicJsonDocument root(512);
+  DeserializationError je = deserializeJson(root, reply);
+  if (je)
+#endif
+  {
     ESP_LOGE(acme_tag, "%s : could not parse JSON", __FUNCTION__);
     free(reply);
     return;
@@ -2982,7 +3135,12 @@ void Acme::FinalizeOrder() {
   free(reply);
 }
 
-void Acme::ReadFinalizeReply(JsonObject &json) {
+#ifdef ARDUINOJSON_5
+void Acme::ReadFinalizeReply(JsonObject &json)
+#else
+void Acme::ReadFinalizeReply(DynamicJsonDocument &json)
+#endif
+{
   ReadOrder(json);
 }
 
