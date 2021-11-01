@@ -28,6 +28,11 @@
 #ifndef	_ACME_H_
 #define	_ACME_H_
 
+/*
+ * You can choose to use ArduinoJson v6 or v5 here.
+ */
+#undef ARDUINOJSON_5
+
 #include <ArduinoJson.h>
 
 #include <sys/socket.h>
@@ -253,7 +258,6 @@ class Acme {
     bool	RequestNewAccount(const char *contact, bool onlyExisting);
     bool	ReadAccountInfo();
     void	WriteAccountInfo();
-    void	ReadAccount(JsonObject &);
     void	ClearAccount();
 
     void	RequestNewOrder(const char *url);
@@ -262,7 +266,6 @@ class Acme {
     void	ClearOrderContent();
     bool	ReadOrderInfo();
     void	WriteOrderInfo();
-    void	ReadOrder(JsonObject &);
     bool	ValidateOrder();
     bool	ValidateAlertServer();
     void	EnableLocalWebServer();
@@ -271,13 +274,26 @@ class Acme {
     int		DownloadAuthorizationResource();
     bool	CreateValidationFile(const char *localfn, const char *token);
     char	*CreateValidationString(const char *token);
-    void	ReadChallenge(JsonObject &);
-    bool	ReadAuthorizationReply(JsonObject &json);
     void	ClearChallenge();
 
     void	FinalizeOrder();
     bool	DownloadCertificate();
+
+    // All stubs of ArduinoJson dependent functions.
+#ifdef ARDUINOJSON_5
+    void	ReadAccount(JsonObject &);
+    void	ReadChallenge(JsonObject &);
+    bool	ReadAuthorizationReply(JsonObject &json);
+    void	ReadOrder(JsonObject &);
     void	ReadFinalizeReply(JsonObject &json);
+#else
+    void 	ReadAccount(DynamicJsonDocument &);
+    void	ReadChallenge(DynamicJsonDocument &);
+    bool	ReadAuthorizationReply(DynamicJsonDocument &);
+    void	ReadOrder(DynamicJsonDocument &);
+    void	ReadFinalizeReply(DynamicJsonDocument &);
+#endif
+
     char	*GenerateCSR();
     int		CreateAltUrlList(mbedtls_x509write_csr req);
 
@@ -302,7 +318,6 @@ class Acme {
 
     char	*nonce;
     int		nonce_use;
-    // char	*location;	// moved to Account
     char	*account_location;
     char	*reply_buffer;
     int		reply_buffer_len;
