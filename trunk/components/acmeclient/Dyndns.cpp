@@ -244,48 +244,35 @@ bool Dyndns::update() {
   esp_http_client_cleanup(http_client);
 
   return ok;
-
-#if 0
-  if (err == 0) {
-    ESP_LOGD(dyndns_tag, "Success ");
-  } else if (err == 0) {
-    // timeout
-    ESP_LOGE(dyndns_tag, "Timeout");
-  } else {
-    ESP_LOGE(dyndns_tag, "HTTP GET failed");
-  }
-#endif
 }
-
-static const char *sdyndns_tag = "static dyndns";
 
 esp_err_t Dyndns::_http_event_handler(esp_http_client_event_t *evt)
 {
     switch(evt->event_id) {
         case HTTP_EVENT_ERROR:
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ERROR");
+            ESP_LOGD(__dyndns->dyndns_tag, "HTTP_EVENT_ERROR");
             break;
         case HTTP_EVENT_ON_CONNECTED:
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_CONNECTED");
+            ESP_LOGD(__dyndns->dyndns_tag, "HTTP_EVENT_ON_CONNECTED");
             break;
         case HTTP_EVENT_HEADER_SENT:
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_HEADER_SENT");
+            ESP_LOGD(__dyndns->dyndns_tag, "HTTP_EVENT_HEADER_SENT");
             break;
         case HTTP_EVENT_ON_HEADER:
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+            ESP_LOGD(__dyndns->dyndns_tag, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
             break;
         case HTTP_EVENT_ON_DATA:
 	    strncpy(__dyndns_buf, (const char *)evt->data, evt->data_len);
 	    __dyndns_buf[evt->data_len] = 0;
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_DATA, len=%d, {%.*s}", evt->data_len,
+            ESP_LOGD(__dyndns->dyndns_tag, "HTTP_EVENT_ON_DATA, len=%d, {%.*s}", evt->data_len,
 	      evt->data_len, __dyndns_buf);
 
             break;
         case HTTP_EVENT_ON_FINISH:
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_ON_FINISH");
+            ESP_LOGD(__dyndns->dyndns_tag, "HTTP_EVENT_ON_FINISH");
             break;
         case HTTP_EVENT_DISCONNECTED:
-            ESP_LOGD(sdyndns_tag, "HTTP_EVENT_DISCONNECTED");
+            ESP_LOGD(__dyndns->dyndns_tag, "HTTP_EVENT_DISCONNECTED");
             break;
     }
     return ESP_OK;
