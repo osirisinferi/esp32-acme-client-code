@@ -1384,10 +1384,12 @@ bool Acme::RequestNewAccount(const char *contact, bool onlyExisting) {
 #ifdef ARDUINOJSON_5
   const char *reply_status = root[acme_json_status];
 #else
-  int reply_status_int = root[acme_json_status] | -1;
-  ESP_LOGI(acme_tag, "JSON status \"%s\" -> %d", acme_json_status, reply_status_int);
   const char *reply_status = root[acme_json_status].as<const char *>();
-  ESP_LOGI(acme_tag, "JSON status \"%s\" -> %s", acme_json_status, reply_status ? reply_status : "null");
+  ESP_LOGD(acme_tag, "JSON status \"%s\" -> %s", acme_json_status, reply_status ? reply_status : "null");
+  if (reply_status == 0) {
+    int reply_status_int = root[acme_json_status] | -1;
+    ESP_LOGE(acme_tag, "JSON status \"%s\" -> %d", acme_json_status, reply_status_int);
+  }
 #endif
   if (reply_status && strcmp(reply_status, acme_status_valid) != 0) {
     const char *reply_type = root[acme_json_type];
@@ -2755,7 +2757,7 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
   char				*buf;
   int				pos, total, rlen, content_length;
 
-  ESP_LOGI(acme_tag, "%s(%s, POST %s, type %s)", __FUNCTION__, query,
+  ESP_LOGD(acme_tag, "%s(%s, POST %s, type %s)", __FUNCTION__, query,
     topost ? topost : "null",
     apptype ? apptype : "null");
 
