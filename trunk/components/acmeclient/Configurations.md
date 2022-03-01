@@ -84,3 +84,34 @@ Note that the nginx should be set to forward traffic on port 80 (normal http tra
 ### Web Server accessible via FTP
 
 ![Image](Drawing-pictures.png "drawing")
+
+# Setup for ACME
+
+During the communication to get a certificate, the Authority attempts to validate the request
+by fetching a file from the domain that requests a certificate.
+It does so from several sources rapidly (almost simultaneously),
+as can be witnessed from these logs :
+
+	I (17:13:20.742) Acme: EnableLocalWebServer(/.well-known/acme-challenge/nOji_LLxrGTa5A6IlX5mOTne3stz1cgcr8pYJz4zxzA)
+	I (17:13:20.752) Acme: ValidateAlertServer
+	I (17:13:22.837) Acme: ValidateAlertServer: reply_status pending
+	E (17:13:22.838) Acme: Acme::ReadAuthorizationReply invalid status (pending), returning
+	E (17:13:22.843) Acme: ValidateAlertServer: failing
+	I (17:13:22.848) Acme: AcmeProcess: ValidateOrder -> fail
+	I (17:13:23.083) Acme: Writing order info into /fs/acme/production/order.json
+	I (17:13:23.249) Acme: acme_http_get_handler: URI /.well-known/acme-challenge/nOji_LLxrGTa5A6IlX5mOTne3stz1cgcr8pYJz4zxzA
+	I (17:13:23.259) Acme: acme_http_get_handler: URI /.well-known/acme-challenge/nOji_LLxrGTa5A6IlX5mOTne3stz1cgcr8pYJz4zxzA
+	I (17:13:23.269) Acme: acme_http_get_handler: URI /.well-known/acme-challenge/nOji_LLxrGTa5A6IlX5mOTne3stz1cgcr8pYJz4zxzA
+	I (17:13:23.302) Acme: ValidateOrder
+
+so three seconds after acmeclient installed the file, it was grabbed three times with 10ms intervals.
+
+For this traffic to succeed, a http get (over port 80) must get to the ESP32.
+So you'll need to define this domain on the Raspberry PI's nginx, and forward it to the ESP32.
+
+For real traffic to occur afterwards, your NAT modem must be instructed to forward business queries over a port of your choice to the ESP.
+
+So
+	port	URL served	Actor		Target
+	80	esp32-fqdn	PI's nginx	esp32:80
+	1234	esp32-fqdn	NAT router	esp32:1234

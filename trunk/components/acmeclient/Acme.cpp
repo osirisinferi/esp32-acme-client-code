@@ -11,7 +11,7 @@
  * We're implementing ACME v2 (RFC 8555), which has status "proposed standard".
  * ACME v1 has risks and should be avoided.
  *
- * Copyright (c) 2019, 2020, 2021 Danny Backx
+ * Copyright (c) 2019, 2020, 2021, 2022 Danny Backx
  *
  * License (MIT license):
  *   Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -558,6 +558,7 @@ bool Acme::AcmeProcess(time_t now) {
 }
 
 bool Acme::CreateNewAccount() {
+  ESP_LOGD(acme_tag, "%s", __FUNCTION__);
   if (!connected) {
     ESP_LOGE(acme_tag, "%s: not connected", __FUNCTION__);
     return false;
@@ -1086,6 +1087,7 @@ void Acme::setNonce(char *s) {
 
 // This is needed because the location field is passed back in an HTTP header
 void Acme::setLocation(const char *s) {
+  ESP_LOGD(acme_tag, "%s(%s)", __FUNCTION__, s);
   if (account_location)
     free(account_location);
   account_location = strdup(s);
@@ -1295,6 +1297,9 @@ void Acme::WritePrivateKey() {
  * The "onlyExisting" parameter is used to check whether an account pre-exists. Don't use error logging then.
  */
 bool Acme::RequestNewAccount(const char *contact, bool onlyExisting) {
+  ESP_LOGD(acme_tag, "%s(%s,%s)", __FUNCTION__, contact,
+    onlyExisting ? "onlyExisting" : "alwaysCreate");
+
   char *msg, *jwk, *payload;
 
   if (directory == 0) {
@@ -1369,7 +1374,21 @@ bool Acme::RequestNewAccount(const char *contact, bool onlyExisting) {
   }
   ESP_LOGD(acme_tag, "%s : JSON opened", __FUNCTION__);
 
+  /*
+   * Depending on the kind of reply, reply_status can be a HTTP error code as a number (no quotes),
+   * or an ACME status code like "valid".
+   * ArduinoJson 6.x appears to have trouble with that unless you give it some love.
+   *   And even then : the .as<const char *>() doesn't appear to help.
+   * Fortunately we can just bail on this and have the caller request a new account.
+   */
+#ifdef ARDUINOJSON_5
   const char *reply_status = root[acme_json_status];
+#else
+  int reply_status_int = root[acme_json_status] | -1;
+  ESP_LOGI(acme_tag, "JSON status \"%s\" -> %d", acme_json_status, reply_status_int);
+  const char *reply_status = root[acme_json_status].as<const char *>();
+  ESP_LOGI(acme_tag, "JSON status \"%s\" -> %s", acme_json_status, reply_status ? reply_status : "null");
+#endif
   if (reply_status && strcmp(reply_status, acme_status_valid) != 0) {
     const char *reply_type = root[acme_json_type];
     const char *reply_detail = root[acme_json_detail];
@@ -1380,8 +1399,18 @@ bool Acme::RequestNewAccount(const char *contact, bool onlyExisting) {
     free(reply);
     return false;
   } else if (reply_status == 0) {
-    // ESP_LOGE(acme_tag, "%s: null reply_status", __FUNCTION__);
+    /*
+     * See above, this could be caused by e.g.
+     *		{
+     *		  "type": "urn:ietf:params:acme:error:accountDoesNotExist",
+     *		  "detail": "No account exists with the provided key",
+     *		  "status": 400
+     *		}
+     * but we can bail on this.
+     */
     ESP_LOGE(acme_tag, "%s: null reply_status (reply %s)", __FUNCTION__, reply);
+    free(reply);
+    return false;
   } else {
     ESP_LOGD(acme_tag, "%s: reply_status '%s'", __FUNCTION__, reply_status);
   }
@@ -1738,7 +1767,7 @@ void Acme::RequestNewOrder(const char *url, const char **alt_urls) {
   free((void *)request2);
 
   if (! msg) {
-    ESP_LOGE(acme_tag, "%s: null message", __FUNCTION__);
+    ESP_LOGE(acme_tag, "%s: MakeMessageKID -> null message", __FUNCTION__);
     return;
   }
   ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, msg);
@@ -1819,7 +1848,7 @@ void Acme::RequestNewOrder(const char *url) {
   msg = MakeMessageKID(directory->newOrder, request);
 
   if (! msg) {
-    ESP_LOGE(acme_tag, "%s: null message", __FUNCTION__);
+    ESP_LOGE(acme_tag, "%s: MakeMessageKID -> null message", __FUNCTION__);
     return;
   }
   ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, msg);
@@ -2648,8 +2677,10 @@ char *Acme::MakeMessageKID(const char *url, const char *payload) {
   ESP_LOGD(acme_tag, "%s(%s,%s)", __FUNCTION__, url, payload);
 
   char *prot = MakeProtectedKID(url);
-  if (prot == 0)
+  if (prot == 0) {
+    ESP_LOGD(acme_tag, "%s: MakeProtectedKID -> null", __FUNCTION__);
     return 0;
+  }
 
   ESP_LOGD(acme_tag, "PR %s", prot);
   char *pr = Base64(prot);
@@ -2694,6 +2725,10 @@ void Acme::SetAcmeUserAgentHeader(esp_http_client_handle_t client) {
  * {"alg": "RS256", "nonce": "webISTv8", "kid": "https://acme-staging-v02.api.letsencrypt.org/acme/acct/012", "url": "https://acme-staging-v02.api.letsencrypt.org/acme/new-order"}
  */
 char *Acme::MakeProtectedKID(const char *query) {
+  if (account->location == 0)
+    ESP_LOGE(acme_tag, "%s: location null", __FUNCTION__);
+  if (nonce == 0)
+    ESP_LOGE(acme_tag, "%s: nonce null", __FUNCTION__);
   if (account->location == 0 || nonce == 0)
     return 0;
 
@@ -2720,7 +2755,7 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
   char				*buf;
   int				pos, total, rlen, content_length;
 
-  ESP_LOGD(acme_tag, "%s(%s, POST %s, type %s)", __FUNCTION__, query,
+  ESP_LOGI(acme_tag, "%s(%s, POST %s, type %s)", __FUNCTION__, query,
     topost ? topost : "null",
     apptype ? apptype : "null");
 
@@ -2780,7 +2815,7 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
     err = esp_http_client_perform(client);
 
     // Ok, now the data has been captured in Acme::HttpEvent, just pass it on and finish up.
-    // ESP_LOGD(acme_tag, "%s -> %s", __FUNCTION__, buf);
+    ESP_LOGD(acme_tag, "%s -> %*s", __FUNCTION__, reply_buffer_len, reply_buffer);
 
     esp_http_client_close(client);
     esp_http_client_cleanup(client);

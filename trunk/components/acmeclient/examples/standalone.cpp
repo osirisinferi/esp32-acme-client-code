@@ -88,6 +88,9 @@ void setup(void) {
 
   // Make stuff from the underlying libraries quieter
   esp_log_level_set("wifi", ESP_LOG_ERROR);
+  esp_log_level_set("wifi_init", ESP_LOG_ERROR);
+  esp_log_level_set("phy_init", ESP_LOG_ERROR);
+  esp_log_level_set("esp_netif_handlers", ESP_LOG_ERROR);
   esp_log_level_set("system_api", ESP_LOG_ERROR);
 
   ESP_LOGD(acmeclient_tag, "Starting WiFi "); 
@@ -169,7 +172,7 @@ void setup(void) {
   acme->setOrderFilename("order.json");
   acme->setAccountKeyFilename("account.pem");
   acme->setCertKeyFilename("certkey.pem");
-  acme->setCertificateFilename("certificate.pem");
+  acme->setCertificateFilename("certificate.der");
   acme->setRootCertificate(root_pem_string);
 
   // No action before time has synced via SNTP
