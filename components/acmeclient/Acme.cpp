@@ -45,6 +45,7 @@
 #include <mbedtls/asn1write.h>
 #include <mbedtls/x509_csr.h>
 #include <esp_http_client.h>
+#include <esp_crt_bundle.h>
 
 #include <dirent.h>
 
@@ -1026,6 +1027,7 @@ bool Acme::RequestNewNonce() {
   memset(&httpc, 0, sizeof(httpc));
   httpc.url = directory->newNonce;
   httpc.event_handler = NonceHttpEvent;
+  httpc.crt_bundle_attach = esp_crt_bundle_attach;
   if (root_certificate)
     httpc.cert_pem = root_certificate;	// Required in esp-idf 4.3 for https
 
@@ -2766,6 +2768,7 @@ char *Acme::PerformWebQuery(const char *query, const char *topost, const char *a
   httpc.event_handler = HttpEvent;
   if (root_certificate)
     httpc.cert_pem = root_certificate;	// Required in esp-idf 4.3 for https
+  httpc.crt_bundle_attach = esp_crt_bundle_attach;
 
   client = esp_http_client_init(&httpc);
 
